@@ -48,7 +48,8 @@ Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 
 ## Relations
 - Project —has→ Task (1..n)
-- Project —has→ Baseline (0..11, numbered 0..10; the cap is UNVERIFIED, checked in M7)
+- Project —has→ Baseline (0..11, numbered 0..10: import, the schema and
+  `rebaseline` all refuse any other number; the cap is UNVERIFIED, checked in M7)
 - Baseline —has→ Baseline task row —for→ Task
 - Task —has→ Task progress (1) —carries→ Task version
 - Source —emits→ Source item —versioned as→ Item version
@@ -107,4 +108,7 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
 - `notes` is appended as dated entries; existing text is never replaced.
 - Re-baseline appends and locks the new baseline; old baselines never
   change. It refuses past baseline number 10 (UNVERIFIED, checked in M7).
-- Imported baselines stay unlocked until `baseline lock`.
+- Imported baselines stay unlocked until `baseline lock`. A baseline is
+  created unlocked and locked once, by `baseline lock` or `rebaseline`; it
+  is never unlocked.
+- A database holds one project; the schema refuses a second (Q14).
