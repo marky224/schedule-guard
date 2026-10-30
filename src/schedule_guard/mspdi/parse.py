@@ -184,7 +184,7 @@ def _task(el: ET.Element, index: int) -> MspdiTask:
             duration=_duration(b, "Duration", bwhere),
             work=_duration(b, "Work", bwhere),
             cost=_decimal(b, "Cost", bwhere),
-            xml_c14n=_c14n(b, bwhere),
+            xml_c14n=c14n(b, bwhere),
         ))
 
     return MspdiTask(
@@ -285,10 +285,10 @@ def _plan_c14n(task: ET.Element, where: str) -> bytes:
             part = copy.copy(child)
             part.tail = None  # the whitespace between the task's children isn't part of the plan
             plan.append(part)
-    return _c14n(plan, f"{where} planned elements")
+    return c14n(plan, f"{where} planned elements")
 
 
-def _c14n(el: ET.Element, where: str) -> bytes:
+def c14n(el: ET.Element, where: str) -> bytes:
     """C14N 2.0 bytes of one subtree, with the MSPDI namespace as the default.
 
     Every element and attribute in it must be in the MSPDI namespace. The

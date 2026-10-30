@@ -15,7 +15,8 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 ## Commands
 - Install / sync: `uv sync` (later runs: `uv sync --offline`; ask before adding
   any dependency)
-- Dev: `uv run schedule-guard --help`
+- Dev: `uv run schedule-guard --help`; database commands take
+  `--db <path>`: keep the file outside the repo (`*.db` is gitignored)
 - Test all: `uv run pytest -q`
 - Test one: `uv run pytest -q tests/test_smoke.py::test_cli_version_prints_package_version`
 - Regenerate the MSPDI fixture: `uv run python scripts/make_fixture.py`
@@ -27,9 +28,10 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 ## Map
 - src/schedule_guard/ — application code (`cli.py`, `mspdi/parse.py` safe
   MSPDI reader, `store/schema.sql` SQLite schema and read-only triggers,
-  the executable domain model, opened by `store/db.py`)
-- tests/ — oracles (smoke, fixture, MSPDI parser and store trigger tests
-  now; property tests from M3)
+  the executable domain model, opened by `store/db.py`; `importer.py`,
+  `baselines.py`)
+- tests/ — oracles (smoke, fixture, MSPDI parser, store trigger, import and
+  baseline tests now; property tests from M3)
 - tests/fixtures/ — generated, fictional inputs (`riverbend-clinic.xml`)
 - scripts/ — `make_fixture.py`, the seeded fixture generator
 - specs/001-offline-core/ — spec.md, plan.md, tasks.md for M1–M6

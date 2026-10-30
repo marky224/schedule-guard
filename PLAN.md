@@ -87,10 +87,12 @@ CLAUDE.md                            [M0] stack, commands, map, invariants
 specs/001-offline-core/              [M0] spec, plan, tasks for M1–M6
 src/schedule_guard/                  [M0]
   __init__.py                        [M0] package version
-  cli.py                             [M0] argparse entry point: `schedule-guard ...` (`--version` only so far)
+  cli.py                             [M0] argparse entry point: `schedule-guard ...` (`--version`, `import`, `baseline lock`, `rebaseline` so far)
   mspdi/parse.py                     [M1] safe MSPDI reader (defusedxml)
   mspdi/export.py                    progress-only MSPDI writer (Phase 2)
   store/schema.sql, store/db.py      [M2] SQLite schema, read-only triggers; open/migrate, transactions
+  importer.py                        [M2] `import` into an empty database
+  baselines.py                       [M2] `baseline lock`, `rebaseline`
   guard.py                           pure rules: (task state, update) -> outcome
   sync.py                            runs, idempotency, rerun
   sources/base.py                    SourceAdapter protocol
@@ -103,7 +105,7 @@ src/schedule_guard/                  [M0]
   demo.py                            loads fake data for screenshots
 scripts/make_fixture.py              [M1] deterministic fixture generator
 tests/fixtures/                      [M1] generated MSPDI + update files (fake data only; `riverbend-clinic.xml` so far)
-tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py`, `test_fixture.py`, `test_mspdi_parse.py`, `test_store_triggers.py` so far)
+tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py`, `test_fixture.py`, `test_mspdi_parse.py`, `test_store_triggers.py`, `test_import.py`, `test_baselines.py` so far)
 deploy/systemd/                      user .service + .timer (Phase 2)
 docs/tenant-setup.md                 Phase 2 runbook for the tenant admin
 docs/spike-graph-selected.md         Phase 2 spike results
@@ -114,9 +116,9 @@ CLI (Phase 1):
 
 | Command | Effect |
 | --- | --- |
-| `schedule-guard import <file.xml>` | Parses the MSPDI file, then stores the project, master schedule, baselines and raw file bytes. Works only on an empty project. |
-| `schedule-guard baseline lock [--number N]` | Locks a baseline that was imported. Locked baselines are read-only. |
-| `schedule-guard rebaseline --confirm --reason "..."` | Admin only. Appends a new baseline number built from the current planned values. Old baselines never change (Q7). Refuses past baseline number 10 (Project's Baseline + Baseline1–10: **UNVERIFIED**, [L14] gives no range; checked in M7). |
+| `schedule-guard import --db <path> <file.xml>` | Parses the MSPDI file, then stores the project, master schedule, baselines and raw file bytes. Works only on an empty project. |
+| `schedule-guard baseline lock --db <path> [--number N]` | Locks a baseline that was imported (Baseline 0 by default). Locked baselines are read-only. |
+| `schedule-guard rebaseline --db <path> --confirm --reason "..."` | Admin only. Appends a new baseline number built from the current planned values, and locks it. Old baselines never change (Q7). Refuses past baseline number 10 (Project's Baseline + Baseline1–10: **UNVERIFIED**, [L14] gives no range; checked in M7). |
 | `schedule-guard sync now [--source file:<path>]` | Runs a sync immediately. Records a run with an id. |
 | `schedule-guard sync daily` | Same as `sync now`, labelled `daily`. The timer calls this one. |
 | `schedule-guard rerun <run-id>` | Reprocesses the source items that run captured. Keys already decided count as duplicates. Records a new run with `rerun_of`. |
@@ -124,6 +126,9 @@ CLI (Phase 1):
 | `schedule-guard report [--port 8000]` | Serves the read-only HTML report on 127.0.0.1. |
 | `schedule-guard demo [--db <path>]` | Builds a fresh demo DB from the fixture and scripted updates (some applied, some conflicts), then serves the report. |
 | `schedule-guard export <out.xml>` | Phase 2 (offline). Writes MSPDI with progress applied and the baseline untouched. |
+
+`import`, `baseline lock` and `rebaseline` take `--db <path>` (required); the
+file lives outside the repo or in a gitignored path (§4).
 
 Runtime deps: `fastapi`, `uvicorn`, `jinja2`, `defusedxml`. Phase 2 adds `msal`
 and `httpx`. Dev deps: `pytest`, `hypothesis`, `httpx` (for TestClient).

@@ -1,7 +1,9 @@
 # Domain ontology: schedule-guard
 
-Status: draft (from PLAN.md §3–5; no src/ schemas yet, M2 adds them)
-Last verified: 2026-10-29
+Status: current for `project`, `task`, `baseline` and `baseline_task`
+(`src/schedule_guard/store/schema.sql`, M2); the other entities are still
+planned (PLAN.md §3–5)
+Last verified: 2026-10-30
 Executable source of truth: src/ schemas. If this page disagrees with code, code wins.
 
 ## Terms (use only these)
@@ -37,11 +39,12 @@ Executable source of truth: src/ schemas. If this page disagrees with code, code
 
 Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 
-## Entities (planned tables, PLAN.md §4)
-- `project`, `task` (master schedule), `baseline`, `baseline_task`
-- `task_progress` (progress fields + task version)
-- `source_update`, `outcome`, `conflict`
-- `sync_run`, `run_item`, `source_cursor`, `writeback` (Phase 2 outbox)
+## Entities (tables, PLAN.md §4)
+- In the schema: `project`, `task` (master schedule), `baseline`, `baseline_task`
+- Planned:
+  - `task_progress` (progress fields + task version)
+  - `source_update`, `outcome`, `conflict`
+  - `sync_run`, `run_item`, `source_cursor`, `writeback` (Phase 2 outbox)
 
 ## Relations
 - Project —has→ Task (1..n)
@@ -102,5 +105,6 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
   actual start, 100 % requires an actual finish.
 - Progress on summary tasks is rejected (`summary_task`).
 - `notes` is appended as dated entries; existing text is never replaced.
-- Re-baseline appends; old baselines never change. It refuses past baseline
-  number 10 (UNVERIFIED, checked in M7).
+- Re-baseline appends and locks the new baseline; old baselines never
+  change. It refuses past baseline number 10 (UNVERIFIED, checked in M7).
+- Imported baselines stay unlocked until `baseline lock`.

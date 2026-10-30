@@ -15,11 +15,11 @@ Format: `- [ ] T000 [P?] [USn] Description (path)`
 ### M2: store, import, baselines
 - [x] T020 [US1] Schema with read-only triggers on `project`, `task`, `baseline`, `baseline_task`, including BEFORE INSERT triggers that refuse an existing key (`INSERT OR REPLACE`) or a missing or closed parent; all four tables WITHOUT ROWID with no unique index of any kind besides the primary key (`src/schedule_guard/store/schema.sql`)
 - [x] T021 [US1] DB open/migrate helpers (`src/schedule_guard/store/db.py`)
-- [ ] T022 [US1] `import` into an empty project only; refuse a second import (Q14) (`src/schedule_guard/importer.py`, `src/schedule_guard/cli.py`)
-- [ ] T023 [US2] `baseline lock` and `rebaseline --confirm --reason`, append-only (Q7), refuse past number 10 (UNVERIFIED, checked in M7); rebaseline inserts the new baseline's `baseline_task` rows before it sets `locked_at`, since the INSERT trigger refuses rows for a locked baseline (`src/schedule_guard/baselines.py`, `src/schedule_guard/cli.py`)
+- [x] T022 [US1] `import` into an empty project only; refuse a second import (Q14) (`src/schedule_guard/importer.py`, `src/schedule_guard/cli.py`)
+- [x] T023 [US2] `baseline lock` and `rebaseline --confirm --reason`, append-only (Q7), refuse past number 10 (UNVERIFIED, checked in M7); rebaseline inserts the new baseline's `baseline_task` rows before it sets `locked_at`, since the INSERT trigger refuses rows for a locked baseline (`src/schedule_guard/baselines.py`, `src/schedule_guard/cli.py`)
 - [x] T024 [P] [US1] Trigger tests, including `INSERT OR REPLACE` with an existing key or an explicit rowid (all four tables, including the project delete and re-insert), `UPDATE OR REPLACE ... SET rowid`, project DELETE and id change, orphan inserts, and a schema check (`PRAGMA table_list` shows `wr` = 1 for the four tables; every `PRAGMA index_list` row with `unique` = 1 has origin `pk`), with the default `recursive_triggers = OFF` (`tests/test_store_triggers.py`)
-- [ ] T025 [P] [US1] Import round-trip tests (`tests/test_import.py`)
-- [ ] T026 [P] [US2] Baseline command tests (`tests/test_baselines.py`)
+- [x] T025 [P] [US1] Import round-trip tests (`tests/test_import.py`)
+- [x] T026 [P] [US2] Baseline command tests (`tests/test_baselines.py`)
 ### M3: guard
 - [ ] T030 [US3] Injectable clock (`src/schedule_guard/clock.py`)
 - [ ] T031 [US3] Pure guard G0–G7 with Q6 checks in G5/G6, summary-task reject (Q4), notes append (Q3) (`src/schedule_guard/guard.py`)

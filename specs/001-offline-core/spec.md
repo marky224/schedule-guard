@@ -1,7 +1,7 @@
 # Spec: 001 offline core (PLAN.md milestones M1–M6)
 
 Status: derived from the approved PLAN.md (approved 2026-10-23); M1 done
-2026-10-29, M2–M6 not started.
+2026-10-29, M2 done 2026-10-30, M3–M6 not started.
 Source plan: [PLAN.md](../../PLAN.md) §1–8, §11. Terms: `.claude/skills/domain/`.
 
 ## Problem
@@ -35,18 +35,20 @@ or any baseline.
 - Full MSPDI XSD validation (PLAN.md C7).
 
 ## Behaviors
-- **US1 Import (M1, M2).** `schedule-guard import <file.xml>` parses an MSPDI
-  file with defusedxml (DTDs, entities and external references forbidden;
-  over 20 MB or over 10,000 tasks rejected; root must be `Project` in
-  namespace `http://schemas.microsoft.com/project`). It stores the raw bytes
-  with their SHA-256, the master schedule per task, and every `<Baseline>`
+- **US1 Import (M1, M2).** `schedule-guard import --db <path> <file.xml>`
+  parses an MSPDI file with defusedxml (DTDs, entities and external
+  references forbidden; over 20 MB or over 10,000 tasks rejected; root must
+  be `Project` in namespace `http://schemas.microsoft.com/project`). It
+  stores the raw bytes with their SHA-256, the master schedule per task
+  (with its planned elements as C14N bytes), and every `<Baseline>`
   subtree as C14N bytes, in one transaction that ends by setting the
   project's `import_finished_at`. After that, the schema refuses new task
   rows. It works only on an empty project (Q14); a second import is refused.
   In v1.0 a changed schedule goes into a fresh project database.
-- **US2 Baselines (M2).** `baseline lock [--number N]` locks an imported
-  baseline. `rebaseline --confirm --reason "..."` appends the next baseline
-  number from the current planned values; old baselines never change and
+- **US2 Baselines (M2).** `baseline lock --db <path> [--number N]` locks an
+  imported baseline (Baseline 0 by default). `rebaseline --db <path>
+  --confirm --reason "..."` appends the next baseline number from the
+  current planned values and locks it; old baselines never change and
   history is kept (Q7). A locked baseline refuses new rows as well as
   updates and deletes. Without `--confirm` or `--reason` it refuses. It
   refuses past baseline number 10 (**UNVERIFIED**: MS Project's Baseline plus
@@ -128,6 +130,9 @@ or any baseline.
   conflict on; the schema check fails if one is added.
 - Direct SQL INSERT of a `baseline_task` row unless its baseline exists
   with `locked_at` not set and its task exists: the trigger aborts.
+- Imported baselines stay unlocked until `baseline lock` (Q24). Until then
+  the schema still accepts a new row in one for a task it has no row for,
+  though never a changed or deleted row; `baseline lock` ends that.
 - Direct SQL INSERT of a `task` row unless its project exists with
   `import_finished_at` not set: the trigger aborts.
 - Dates in MSPDI are local without offset. At run time "today" is the
