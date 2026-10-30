@@ -1,9 +1,11 @@
 import sys
+import time
 from contextlib import contextmanager
 from xml.etree import ElementTree as ET
 
 import pytest
 
+from schedule_guard.mspdi import parse as parse_module
 from schedule_guard.mspdi.parse import (
     MAX_FILE_BYTES,
     MAX_TASKS,
@@ -170,15 +172,37 @@ def test_rejects_bytes_over_the_size_limit_before_parsing():
         parse_mspdi(b" " * (MAX_FILE_BYTES + 1))
 
 
-def test_reads_a_file_up_to_the_size_limit_and_no_further(tmp_path):
+class ReadRecorder:
+    """A real file that records the size each read() asks for."""
+
+    def __init__(self, f, sizes: list):
+        self._f, self._sizes = f, sizes
+
+    def read(self, size=-1):
+        self._sizes.append(size)
+        return self._f.read(size)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._f.close()
+
+
+def test_reads_a_file_up_to_the_size_limit_and_no_further(tmp_path, monkeypatch):
     at_limit, over = tmp_path / "at-limit.xml", tmp_path / "over.xml"
     with open(at_limit, "wb") as f:
         f.truncate(MAX_FILE_BYTES)
     with open(over, "wb") as f:
         f.truncate(MAX_FILE_BYTES + 1)
+    sizes: list = []
+    monkeypatch.setattr(parse_module, "open", lambda *a, **k: ReadRecorder(open(*a, **k), sizes), raising=False)
     assert len(read_mspdi_bytes(at_limit)) == MAX_FILE_BYTES
     with pytest.raises(MspdiError, match="20 MB"):
         read_mspdi_bytes(over)
+    # An unbounded read() would pull a huge file or an endless stream into memory.
+    assert sizes, "read_mspdi_bytes didn't read through open()"
+    assert all(isinstance(size, int) and 0 <= size <= MAX_FILE_BYTES + 1 for size in sizes), sizes
 
 
 def minimal_tasks(count: int) -> str:
@@ -187,6 +211,19 @@ def minimal_tasks(count: int) -> str:
 
 def test_accepts_exactly_the_task_limit():
     assert len(parse_mspdi(mspdi(minimal_tasks(MAX_TASKS))).tasks) == MAX_TASKS
+
+
+def test_many_baselines_on_one_task_parse_in_linear_time():
+    # Under 2 MB, far inside the size limit. A duplicate-number check that
+    # rescans every earlier Baseline takes about 20 s here; a set, under 2 s.
+    count = 40_000
+    baselines = "".join(f"<Baseline><Number>{number}</Number></Baseline>" for number in range(count))
+    data = mspdi(f"<Task><UID>1</UID>{baselines}</Task>")
+    started = time.perf_counter()
+    (task,) = parse_mspdi(data).tasks
+    elapsed = time.perf_counter() - started
+    assert len(task.baselines) == count
+    assert elapsed < 5, f"{count} Baselines took {elapsed:.1f} s"
 
 
 def test_rejects_more_tasks_than_the_limit():
@@ -267,6 +304,27 @@ BAD_TASKS = {
         f"<Task><UID>1</UID><Baseline><Number>0</Number>{DEEP}</Baseline></Task>",
         "nested too deeply",
     ),
+    # A field with child elements has no single text value, so it is refused, not read in part.
+    "uid-with-child": ("<Task><UID>1<x/>2</UID></Task>", "UID has child elements"),
+    "percent-with-child": (
+        "<Task><UID>1</UID><PercentComplete>4<x/>0</PercentComplete></Task>",
+        "PercentComplete has child elements",
+    ),
+    "summary-with-child": ("<Task><UID>1</UID><Summary>1<x/></Summary></Task>", "Summary has child elements"),
+    "name-with-child": ("<Task><UID>1</UID><Name>Pour<b>EVIL</b> slab</Name></Task>", "Name has child elements"),
+    "wbs-with-child": ("<Task><UID>1</UID><WBS>1.2<x/>.3</WBS></Task>", "WBS has child elements"),
+    "notes-with-child": ("<Task><UID>1</UID><Notes>a<x/>b</Notes></Task>", "Notes has child elements"),
+    "link-uid-with-child": (
+        "<Task><UID>1</UID><PredecessorLink><PredecessorUID>2<x/></PredecessorUID></PredecessorLink></Task>",
+        "PredecessorUID has child elements",
+    ),
+    "baseline-start-with-child": (
+        "<Task><UID>1</UID><Baseline><Number>0</Number><Start>2026-06-01T08:00:00<x/></Start></Baseline></Task>",
+        "Start has child elements",
+    ),
+    # Only XML whitespace (space, tab, CR, LF) may surround a typed value.
+    "uid-no-break-spaces": ("<Task><UID>\u00a012\u00a0</UID></Task>", "UID is not an integer"),
+    "summary-em-space": ("<Task><UID>1</UID><Summary>\u20031</Summary></Task>", "Summary is not a boolean"),
 }
 
 
@@ -274,3 +332,14 @@ BAD_TASKS = {
 def test_rejects_bad_task_fields(tasks, message):
     with pytest.raises(MspdiError, match=message):
         parse_mspdi(mspdi(tasks))
+
+
+def test_rejects_project_title_with_child_elements():
+    data = f'<Project xmlns="{NS}"><Title>River<x/>bend</Title></Project>'.encode()
+    with pytest.raises(MspdiError, match="Title has child elements"):
+        parse_mspdi(data)
+
+
+def test_accepts_xml_whitespace_around_typed_values():
+    (task,) = parse_mspdi(mspdi("<Task><UID>\t 12 \n</UID><PercentComplete> 40\r\n</PercentComplete></Task>")).tasks
+    assert (task.uid, task.percent_complete) == (12, 40)

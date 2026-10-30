@@ -11,6 +11,8 @@ master-schedule fields, the progress fields, predecessor links and
 `<Baseline>` children. Everything else stays untouched in the raw bytes the
 importer stores. Each `<Baseline>` subtree is also returned as C14N 2.0
 bytes. Dates, durations and costs keep their MSPDI text once validated.
+A field read here must hold plain text: one with child elements, or one
+repeated, has no single value and is refused rather than read in part.
 """
 
 import copy
@@ -32,6 +34,7 @@ _DECIMAL = re.compile(r"-?[0-9]{1,18}(?:\.[0-9]{1,6})?")
 _DATETIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}")
 _DURATION = re.compile(r"P(?:[0-9]+Y)?(?:[0-9]+M)?(?:[0-9]+D)?(?:T(?:[0-9]+H)?(?:[0-9]+M)?(?:[0-9]+(?:\.[0-9]+)?S)?)?")
 _BOOL = {"0": False, "1": True, "false": False, "true": True}
+_XML_SPACE = " \t\r\n"  # str.strip() alone would also drop no-break and other Unicode spaces
 
 
 class MspdiError(ValueError):
@@ -157,12 +160,14 @@ def _task(el: ET.Element, index: int) -> MspdiTask:
         ))
 
     baselines = []
+    numbers: set[int] = set()
     for b in el.findall(_q("Baseline")):
         number = _int(b, "Number", f"{where} Baseline", minimum=0)
         if number is None:
             raise MspdiError(f"{where}: Baseline without Number")
-        if any(existing.number == number for existing in baselines):
+        if number in numbers:
             raise MspdiError(f"{where}: more than one Baseline {number}")
+        numbers.add(number)
         bwhere = f"{where} Baseline {number}"
         baselines.append(MspdiBaseline(
             number=number,
@@ -196,12 +201,17 @@ def _task(el: ET.Element, index: int) -> MspdiTask:
 
 
 def _text(parent: ET.Element, tag: str, where: str) -> str | None:
-    """Text of the single `tag` child; None if absent. Two of them is ambiguous, so refused."""
+    """Text of the single `tag` child; None if absent.
+
+    Two of them, or child elements inside it, are ambiguous, so refused.
+    """
     found = parent.findall(_q(tag))
     if not found:
         return None
     if len(found) > 1:
         raise MspdiError(f"{where}: more than one {tag} element")
+    if len(found[0]):
+        raise MspdiError(f"{where}: {tag} has child elements")
     return found[0].text or ""
 
 
@@ -209,7 +219,7 @@ def _value(parent: ET.Element, tag: str, where: str, pattern: re.Pattern, kind: 
     text = _text(parent, tag, where)
     if text is None:
         return None
-    value = text.strip()
+    value = text.strip(_XML_SPACE)
     if not pattern.fullmatch(value):
         raise MspdiError(f"{where}: {tag} is not {kind}: {text!r}")
     return value
@@ -231,9 +241,10 @@ def _bool(parent: ET.Element, tag: str, where: str) -> bool:
     text = _text(parent, tag, where)
     if text is None:
         return False
-    if text.strip() not in _BOOL:
+    value = text.strip(_XML_SPACE)
+    if value not in _BOOL:
         raise MspdiError(f"{where}: {tag} is not a boolean: {text!r}")
-    return _BOOL[text.strip()]
+    return _BOOL[value]
 
 
 def _datetime(parent: ET.Element, tag: str, where: str) -> str | None:
