@@ -88,7 +88,7 @@ specs/001-offline-core/              [M0] spec, plan, tasks for M1–M6
 src/schedule_guard/                  [M0]
   __init__.py                        [M0] package version
   cli.py                             [M0] argparse entry point: `schedule-guard ...` (`--version` only so far)
-  mspdi/parse.py                     safe MSPDI reader (defusedxml)
+  mspdi/parse.py                     [M1] safe MSPDI reader (defusedxml)
   mspdi/export.py                    progress-only MSPDI writer (Phase 2)
   store/schema.sql, store/db.py      SQLite schema, read-only triggers
   guard.py                           pure rules: (task state, update) -> outcome
@@ -103,7 +103,7 @@ src/schedule_guard/                  [M0]
   demo.py                            loads fake data for screenshots
 scripts/make_fixture.py              [M1] deterministic fixture generator
 tests/fixtures/                      [M1] generated MSPDI + update files (fake data only; `riverbend-clinic.xml` so far)
-tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py`, `test_fixture.py` so far)
+tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py`, `test_fixture.py`, `test_mspdi_parse.py` so far)
 deploy/systemd/                      user .service + .timer (Phase 2)
 docs/tenant-setup.md                 Phase 2 runbook for the tenant admin
 docs/spike-graph-selected.md         Phase 2 spike results

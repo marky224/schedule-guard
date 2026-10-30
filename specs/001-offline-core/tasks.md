@@ -9,9 +9,9 @@ Format: `- [ ] T000 [P?] [USn] Description (path)`
 ### M1: fixture and parser
 - [x] T010 [US1] Seeded generator for the fictional ~40-task clinic build with 5 milestones, predecessor links and Baseline 0, no assignments (`scripts/make_fixture.py`)
 - [x] T011 [US1] Generated fixture checked in (`tests/fixtures/riverbend-clinic.xml`)
-- [ ] T012 [US1] Safe parser: defusedxml with `forbid_dtd=True`, size/task limits, root and namespace check, task subset and C14N baseline bytes (`src/schedule_guard/mspdi/parse.py`)
+- [x] T012 [US1] Safe parser: defusedxml with `forbid_dtd=True`, size/task limits, root and namespace check, task subset and C14N baseline bytes (`src/schedule_guard/mspdi/parse.py`)
 - [x] T013 [P] [US1] Fixture determinism test (`tests/test_fixture.py`)
-- [ ] T014 [P] [US1] Parser tests: fields read, billion laughs, XXE, external DTD, oversize, wrong root (`tests/test_mspdi_parse.py`)
+- [x] T014 [P] [US1] Parser tests: fields read, billion laughs, XXE, external DTD, oversize, wrong root or namespace (`tests/test_mspdi_parse.py`)
 ### M2: store, import, baselines
 - [ ] T020 [US1] Schema with read-only triggers on `project`, `task`, `baseline`, `baseline_task`, including BEFORE INSERT triggers that refuse an existing key (`INSERT OR REPLACE`) or a missing or closed parent (`src/schedule_guard/store/schema.sql`)
 - [ ] T021 [US1] DB open/migrate helpers (`src/schedule_guard/store/db.py`)

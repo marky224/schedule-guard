@@ -25,9 +25,10 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 - Use the system interpreter: `UV_PYTHON_DOWNLOADS=never`, `/usr/bin/python3.12`
 
 ## Map
-- src/schedule_guard/ — application code (`cli.py`; schemas added in M2 are
-  the executable domain model)
-- tests/ — oracles (smoke and fixture tests now; property tests from M3)
+- src/schedule_guard/ — application code (`cli.py`, `mspdi/parse.py` safe
+  MSPDI reader; schemas added in M2 are the executable domain model)
+- tests/ — oracles (smoke, fixture and MSPDI parser tests now; property
+  tests from M3)
 - tests/fixtures/ — generated, fictional inputs (`riverbend-clinic.xml`)
 - scripts/ — `make_fixture.py`, the seeded fixture generator
 - specs/001-offline-core/ — spec.md, plan.md, tasks.md for M1–M6
