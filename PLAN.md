@@ -309,12 +309,18 @@ Rules that hold no matter which check fires:
   = the same C14N of the task's master-schedule elements (`Name`, `WBS`,
   `OutlineLevel`, `Summary`, `Milestone`, `Start`, `Finish`, `Duration`,
   `Work`, each `PredecessorLink`), in file order, under one `<Task>`.
-- Every element and attribute inside a `<Baseline>` or a master-schedule
-  element must be in the MSPDI namespace; anything else is refused before
-  C14N. The stdlib C14N writer searches its namespace list once per name,
-  so a subtree with thousands of namespaces would take quadratic time. That
-  a real Project export never puts another namespace there is
-  **UNVERIFIED** (no real export, Q1); checked in M7.
+- Inside a `<Baseline>` or a master-schedule element only MSPDI-namespace
+  elements are allowed, with no attributes and at most 3 levels below the
+  Baseline or PredecessorLink; anything else is refused before C14N. The
+  stdlib C14N writer searches its namespace list once per name and its
+  stack once per level, so thousands of namespaces would take quadratic
+  time, and nesting near Python's recursion limit about 6 times as long. A
+  Baseline `Number` runs from 0 to 10. That a real Project export stays
+  inside all of these is **UNVERIFIED** (no real export, Q1); checked in M7.
+- The C14N bytes are those of the subtree as ElementTree writes it out
+  again, so a carriage return in text (`&#13;` in the file) is stored there
+  as a line feed. The values read into the other columns, such as
+  `task.name`, keep the carriage return.
 - **Fixture**: `scripts/make_fixture.py` is seeded and deterministic. It writes
   `tests/fixtures/riverbend-clinic.xml`: a fictional ~40-task clinic build by
   "Example Builders Co." in phases Site work, Foundations, Structure, Envelope,

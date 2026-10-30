@@ -10,12 +10,8 @@ import sqlite3
 from datetime import datetime
 from xml.etree import ElementTree as ET
 
-from schedule_guard.mspdi.parse import NS, c14n
+from schedule_guard.mspdi.parse import MAX_BASELINE_NUMBER, NS, c14n
 from schedule_guard.store.db import transaction
-
-# MS Project's Baseline plus Baseline1-10. UNVERIFIED: Learn's Baseline
-# element page gives no range; checked in M7.
-MAX_BASELINE_NUMBER = 10
 
 
 class BaselineRefused(Exception):

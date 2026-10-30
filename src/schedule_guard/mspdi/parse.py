@@ -10,9 +10,11 @@ Only the subset the guard needs is read and type-checked: per task the
 master-schedule fields, the progress fields, predecessor links and
 `<Baseline>` children. Everything else stays untouched in the raw bytes the
 importer stores. Each `<Baseline>` subtree, and the task's master-schedule
-elements together, are also returned as C14N 2.0 bytes; every element and
-attribute in them must be in the MSPDI namespace. Dates, durations and costs
-keep their MSPDI text once validated.
+elements together, are also returned as C14N 2.0 bytes; they must hold only
+MSPDI-namespace elements, no attributes and at most MAX_NESTING levels below
+a Baseline or PredecessorLink. A Baseline Number runs from 0 to
+MAX_BASELINE_NUMBER. Dates, durations and costs keep their MSPDI text once
+validated.
 A field read here must hold plain text: one with child elements, or one
 repeated, has no single value and is refused rather than read in part.
 """
@@ -31,6 +33,10 @@ NS = "http://schemas.microsoft.com/project"
 _NS_OPEN = f"{{{NS}}}"  # how ElementTree starts a name in NS; expat refuses a "}" inside a namespace URI
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_TASKS = 10_000
+# MS Project's Baseline plus Baseline1-10, and how deep a Baseline or a
+# PredecessorLink nests: both UNVERIFIED against a real export until M7.
+MAX_BASELINE_NUMBER = 10
+MAX_NESTING = 3
 # The master schedule's elements; task.plan_c14n holds them.
 _PLANNED = frozenset(_NS_OPEN + tag for tag in (
     "Name", "WBS", "OutlineLevel", "Summary", "Milestone", "Start", "Finish", "Duration", "Work", "PredecessorLink",
@@ -170,7 +176,7 @@ def _task(el: ET.Element, index: int) -> MspdiTask:
     baselines = []
     numbers: set[int] = set()
     for b in el.findall(_q("Baseline")):
-        number = _int(b, "Number", f"{where} Baseline", minimum=0)
+        number = _int(b, "Number", f"{where} Baseline", minimum=0, maximum=MAX_BASELINE_NUMBER)
         if number is None:
             raise MspdiError(f"{where}: Baseline without Number")
         if number in numbers:
@@ -277,6 +283,10 @@ def _decimal(parent: ET.Element, tag: str, where: str) -> str | None:
     return _value(parent, tag, where, _DECIMAL, "a decimal number")
 
 
+def _local(el: ET.Element) -> str:
+    return el.tag.rpartition("}")[2]
+
+
 def _plan_c14n(task: ET.Element, where: str) -> bytes:
     """C14N 2.0 bytes of the task's master-schedule elements, in file order, under one Task."""
     plan = ET.Element(_q("Task"))
@@ -285,28 +295,36 @@ def _plan_c14n(task: ET.Element, where: str) -> bytes:
             part = copy.copy(child)
             part.tail = None  # the whitespace between the task's children isn't part of the plan
             plan.append(part)
-    return c14n(plan, f"{where} planned elements")
+    # The Task element sits one level above each PredecessorLink.
+    return c14n(plan, f"{where} planned elements", max_depth=MAX_NESTING + 1)
 
 
-def c14n(el: ET.Element, where: str) -> bytes:
+def c14n(el: ET.Element, where: str, max_depth: int = MAX_NESTING) -> bytes:
     """C14N 2.0 bytes of one subtree, with the MSPDI namespace as the default.
 
-    Every element and attribute in it must be in the MSPDI namespace. The
-    stdlib C14N writer searches its list of namespaces once per name, so a
-    subtree with thousands of namespaces takes quadratic time; with only the
-    MSPDI one, the work stays linear.
+    The subtree may hold only elements in the MSPDI namespace, no attributes
+    (MSPDI has none there), and no element more than `max_depth` levels
+    below `el`. The stdlib C14N writer searches its list of namespaces once
+    per name and its stack once per level, so with one namespace and a few
+    levels its work stays linear with a small constant.
+
+    The bytes are the C14N of the subtree as ElementTree writes it out
+    again, so a carriage return in text (&#13; in the file) comes back as a
+    line feed; the values read from the same elements keep it.
     """
-    for node in el.iter():
+    pending = [(el, 0)]
+    while pending:
+        node, depth = pending.pop()
         if not node.tag.startswith(_NS_OPEN):
             raise MspdiError(f"{where}: element {node.tag!r} is outside the MSPDI namespace")
-        for name in node.attrib:
-            if not name.startswith(_NS_OPEN):
-                raise MspdiError(f"{where}: attribute {name!r} is outside the MSPDI namespace")
+        if node.attrib:
+            name = next(iter(node.attrib))
+            raise MspdiError(f"{where}: {_local(node)} has attribute {name!r}; MSPDI uses none here")
+        if len(node) and depth == max_depth:
+            raise MspdiError(f"{where}: elements are nested more than {max_depth} levels below {_local(el)}")
+        pending.extend((child, depth + 1) for child in node)
     clone = copy.copy(el)
     clone.tail = None  # the whitespace after </Baseline> isn't part of it
-    try:
-        text = ET.tostring(clone, encoding="unicode", default_namespace=NS)
-    except RecursionError as exc:
-        raise MspdiError(f"{where}: elements are nested too deeply") from exc
+    text = ET.tostring(clone, encoding="unicode", default_namespace=NS)
     # Re-parsing our own serialization of an already-parsed tree: it has no DTD.
     return ET.canonicalize(xml_data=text).encode("utf-8")

@@ -98,10 +98,15 @@ or any baseline.
 ## Edge cases / failures
 - Billion-laughs, XXE file read, external DTD, oversize file, wrong root or
   namespace: rejected with a clear error, no file read, nothing stored.
-- An element or attribute outside the MSPDI namespace inside a `<Baseline>`
-  or a master-schedule element (the bytes kept as C14N): rejected before
-  C14N, so parsing stays linear (UNVERIFIED against a real Project export;
-  checked in M7).
+- Inside a `<Baseline>` or a master-schedule element (the bytes kept as
+  C14N), an element outside the MSPDI namespace, any attribute, or an
+  element more than 3 levels below the Baseline or PredecessorLink: rejected
+  before C14N, so the C14N work stays linear with a small constant. A
+  Baseline `Number` above 10: rejected. (All UNVERIFIED against a real
+  Project export; checked in M7.)
+- A carriage return in text (`&#13;`): stored as a line feed in the C14N
+  bytes, which are those of the subtree as ElementTree writes it out again;
+  the values read into the other columns keep it.
 - Update with allowed and forbidden fields together: whole update is a
   `field_not_allowed` conflict; no field is applied.
 - Two updates made against the same version in one run: the first applies,

@@ -9,6 +9,7 @@ import pytest
 from schedule_guard.mspdi import parse as parse_module
 from schedule_guard.mspdi.parse import (
     MAX_FILE_BYTES,
+    MAX_NESTING,
     MAX_TASKS,
     NS,
     MspdiError,
@@ -281,17 +282,23 @@ def test_accepts_exactly_the_task_limit():
     assert len(parse_mspdi(mspdi(minimal_tasks(MAX_TASKS))).tasks) == MAX_TASKS
 
 
-def test_many_baselines_on_one_task_parse_in_linear_time():
-    # Under 2 MB, far inside the size limit. A duplicate-number check that
-    # rescans every earlier Baseline takes about 20 s here; a set, under 2 s.
+def test_many_baselines_on_one_task_stop_at_number_11():
+    # Under 2 MB, far inside the size limit. Numbers stop at 10 and repeats
+    # are refused, so at most 11 Baselines per task are read before refusing.
     count = 40_000
     baselines = "".join(f"<Baseline><Number>{number}</Number></Baseline>" for number in range(count))
     data = mspdi(f"<Task><UID>1</UID>{baselines}</Task>")
     started = time.perf_counter()
-    (task,) = parse_mspdi(data).tasks
+    with pytest.raises(MspdiError, match="Baseline: Number 11 is out of range"):
+        parse_mspdi(data)
     elapsed = time.perf_counter() - started
-    assert len(task.baselines) == count
     assert elapsed < 5, f"{count} Baselines took {elapsed:.1f} s"
+
+
+def test_accepts_baseline_numbers_0_to_10():
+    baselines = "".join(f"<Baseline><Number>{number}</Number></Baseline>" for number in range(11))
+    (task,) = parse_mspdi(mspdi(f"<Task><UID>1</UID>{baselines}</Task>")).tasks
+    assert [b.number for b in task.baselines] == list(range(11))
 
 
 def namespaced_attributes(count: int) -> str:
@@ -378,6 +385,62 @@ def test_c14n_never_sees_a_namespace_besides_mspdi(tasks, c14n_inputs):
         pass
     namespaces = [declared_namespaces(text) for text in c14n_inputs]
     assert all(ns == [("", NS)] for ns in namespaces), namespaces
+
+
+def nested(depth: int, siblings: int) -> str:
+    return "<x>" * depth + "<y/>" * siblings + "</x>" * depth
+
+
+# About 1.6 MB: 400,000 empty elements under 900 levels of nesting.
+DEEP_AND_WIDE = {
+    "baseline": in_baseline(nested(900, 400_000)),
+    "plan": in_predecessor_link(nested(900, 400_000)),
+}
+
+
+@pytest.mark.parametrize("tasks", DEEP_AND_WIDE.values(), ids=DEEP_AND_WIDE.keys())
+def test_deep_nesting_parses_in_linear_time(tasks):
+    # The stdlib C14N writer walks one stack entry per level for each name,
+    # so passing this to it takes about 10 s here, against 2 s unnested.
+    data = mspdi(tasks)
+    started = time.perf_counter()
+    try:
+        parse_mspdi(data)
+    except MspdiError:
+        pass  # refusing the file is fine; this test checks how long it takes
+    elapsed = time.perf_counter() - started
+    assert elapsed < 5, f"took {elapsed:.1f} s"
+
+
+def nesting_depth(xml_text: str) -> int:
+    parser = ET.XMLPullParser(events=("start", "end"))
+    parser.feed(xml_text)
+    depth = deepest = 0
+    for event, _ in parser.read_events():
+        depth += 1 if event == "start" else -1
+        deepest = max(deepest, depth)
+    return deepest - 1  # levels below the root
+
+
+@pytest.mark.parametrize("tasks", [in_baseline(nested(10, 2)), in_predecessor_link(nested(10, 2))], ids=["baseline", "plan"])
+def test_c14n_never_sees_more_than_a_few_levels(tasks, c14n_inputs):
+    # A bound by counting: 3 levels below a Baseline or a PredecessorLink,
+    # which is 4 below the Task that holds the planned elements.
+    try:
+        parse_mspdi(mspdi(tasks))
+    except MspdiError:
+        pass
+    depths = [nesting_depth(text) for text in c14n_inputs]
+    assert all(depth <= MAX_NESTING + 1 for depth in depths), depths
+
+
+def test_c14n_bytes_read_a_carriage_return_in_text_as_a_line_feed():
+    # Documented: the bytes are the C14N of the tree as ElementTree writes it
+    # out again, which turns a CR in text into a LF; the read values keep it.
+    (cr,) = parse_mspdi(mspdi("<Task><UID>1</UID><Name>a&#13;b</Name></Task>")).tasks
+    (lf,) = parse_mspdi(mspdi("<Task><UID>1</UID><Name>a&#10;b</Name></Task>")).tasks
+    assert (cr.name, lf.name) == ("a\rb", "a\nb")
+    assert cr.plan_c14n == lf.plan_c14n == f'<Task xmlns="{NS}"><Name>a\nb</Name></Task>'.encode()
 
 
 def test_rejects_more_tasks_than_the_limit():
@@ -467,26 +530,40 @@ BAD_TASKS = {
         '<Task><UID>1</UID><Baseline><Number>0</Number><y xmlns="urn:x"/></Baseline></Task>',
         r"element '\{urn:x\}y' is outside the MSPDI namespace",
     ),
+    # No attributes at all: MSPDI uses none in a Baseline or a master-schedule element.
     "baseline-foreign-attribute": (
         '<Task><UID>1</UID><Baseline><Number xmlns:a="urn:x" a:b="1">0</Number></Baseline></Task>',
-        r"attribute '\{urn:x\}b' is outside the MSPDI namespace",
+        r"Number has attribute '\{urn:x\}b'; MSPDI uses none here",
     ),
     "baseline-xml-space-attribute": (
         '<Task><UID>1</UID><Baseline><Number xml:space="preserve">0</Number></Baseline></Task>',
-        r"attribute '\{http://www.w3.org/XML/1998/namespace\}space' is outside the MSPDI namespace",
+        r"Number has attribute '\{http://www.w3.org/XML/1998/namespace\}space'",
     ),
     "baseline-unnamespaced-attribute": (
         '<Task><UID>1</UID><Baseline b="1"><Number>0</Number></Baseline></Task>',
-        "attribute 'b' is outside the MSPDI namespace",
+        "Baseline has attribute 'b'",
+    ),
+    "baseline-mspdi-attribute": (
+        f'<Task><UID>1</UID><Baseline><Number xmlns:p="{NS}" p:z="1">0</Number></Baseline></Task>',
+        r"task UID 1 Baseline 0: Number has attribute '\{http://schemas.microsoft.com/project\}z'",
     ),
     # The same holds for the master-schedule elements kept as plan_c14n.
     "name-foreign-attribute": (
         '<Task><UID>1</UID><Name xmlns:a="urn:x" a:b="1">n</Name></Task>',
-        r"task UID 1 planned elements: attribute '\{urn:x\}b' is outside the MSPDI namespace",
+        r"task UID 1 planned elements: Name has attribute '\{urn:x\}b'",
     ),
     "start-unnamespaced-attribute": (
         '<Task><UID>1</UID><Start b="1">2026-06-01T08:00:00</Start></Task>',
-        "task UID 1 planned elements: attribute 'b' is outside the MSPDI namespace",
+        "task UID 1 planned elements: Start has attribute 'b'",
+    ),
+    "name-mspdi-attribute": (
+        f'<Task><UID>1</UID><Name xmlns:p="{NS}" p:z="1">n</Name></Task>',
+        r"task UID 1 planned elements: Name has attribute '\{http://schemas.microsoft.com/project\}z'",
+    ),
+    "link-mspdi-attribute": (
+        f'<Task><UID>1</UID><PredecessorLink xmlns:p="{NS}" p:z="1"><PredecessorUID>2</PredecessorUID>'
+        "</PredecessorLink></Task>",
+        r"task UID 1 planned elements: PredecessorLink has attribute '\{http://schemas.microsoft.com/project\}z'",
     ),
     "link-foreign-child": (
         '<Task><UID>1</UID><PredecessorLink><PredecessorUID>2</PredecessorUID><y xmlns="urn:x"/>'
@@ -495,7 +572,26 @@ BAD_TASKS = {
     ),
     "baseline-nested-too-deep": (
         f"<Task><UID>1</UID><Baseline><Number>0</Number>{DEEP}</Baseline></Task>",
-        "nested too deeply",
+        "nested more than 3 levels below Baseline",
+    ),
+    # At most 3 levels below a Baseline or a PredecessorLink (UNVERIFIED until M7).
+    "baseline-four-levels": (
+        "<Task><UID>1</UID><Baseline><Number>0</Number><a><b><c><d/></c></b></a></Baseline></Task>",
+        "task UID 1 Baseline 0: elements are nested more than 3 levels below Baseline",
+    ),
+    "link-four-levels": (
+        "<Task><UID>1</UID><PredecessorLink><PredecessorUID>2</PredecessorUID><a><b><c><d/></c></b></a>"
+        "</PredecessorLink></Task>",
+        "task UID 1 planned elements: elements are nested more than 4 levels below Task",
+    ),
+    # Numbers stop at 10, MS Project's Baseline plus Baseline1-10 (UNVERIFIED until M7).
+    "baseline-number-11": (
+        "<Task><UID>1</UID><Baseline><Number>11</Number></Baseline></Task>",
+        "task UID 1 Baseline: Number 11 is out of range",
+    ),
+    "baseline-number-huge": (
+        "<Task><UID>1</UID><Baseline><Number>999999999999999999</Number></Baseline></Task>",
+        "Number 999999999999999999 is out of range",
     ),
     # A field with child elements has no single text value, so it is refused, not read in part.
     "uid-with-child": ("<Task><UID>1<x/>2</UID></Task>", "UID has child elements"),
@@ -531,6 +627,17 @@ def test_rejects_project_title_with_child_elements():
     data = f'<Project xmlns="{NS}"><Title>River<x/>bend</Title></Project>'.encode()
     with pytest.raises(MspdiError, match="Title has child elements"):
         parse_mspdi(data)
+
+
+def test_accepts_three_levels_below_a_baseline_or_a_predecessor_link():
+    three = "<a><b><c/></b></a>"
+    data = mspdi(
+        f"<Task><UID>1</UID><PredecessorLink><PredecessorUID>2</PredecessorUID>{three}</PredecessorLink>"
+        f"<Baseline><Number>0</Number>{three}</Baseline></Task>"
+    )
+    (task,) = parse_mspdi(data).tasks
+    expected = f'<Baseline xmlns="{NS}"><Number>0</Number><a><b><c></c></b></a></Baseline>'.encode()
+    assert task.baselines[0].xml_c14n == expected
 
 
 def test_accepts_xml_whitespace_around_typed_values():
