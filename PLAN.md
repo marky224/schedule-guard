@@ -168,7 +168,9 @@ project(id PK, name, source_sha256, source_xml BLOB, imported_at,
     trigger: BEFORE UPDATE -> ABORT unless the only change is
              import_finished_at going from NULL to a value (the id, raw
              bytes, hash and every other column never change)
-    trigger: BEFORE INSERT -> ABORT when the primary key already exists
+    trigger: BEFORE INSERT -> ABORT when any project row exists (a
+             database holds one project, Q14, so an existing key is
+             refused too)
 
 task(project_id, uid, name, wbs, outline_level, is_summary, is_milestone,
      planned_start, planned_finish, planned_duration, planned_work,
@@ -184,8 +186,10 @@ baseline(project_id, number, locked_at NULL, locked_by, reason, created_at,
     trigger: BEFORE DELETE -> ABORT; BEFORE UPDATE -> ABORT unless the only
              change is the one-time lock: locked_at (with locked_by) going
              from NULL to a value
-    trigger: BEFORE INSERT -> ABORT when the primary key already exists or
-             the project does not exist
+    trigger: BEFORE INSERT -> ABORT when the primary key already exists,
+             the project does not exist, the row is already locked
+             (locked_at or locked_by set), or its number isn't an integer
+             from 0 to 10 (the cap is UNVERIFIED, checked in M7)
 baseline_task(project_id, number, task_uid, start, finish, duration, work, cost,
               xml_c14n BLOB,                 -- C14N bytes of the <Baseline> subtree
               PRIMARY KEY(project_id, number, task_uid)) WITHOUT ROWID
@@ -574,7 +578,7 @@ run.
 | --- | --- | --- | --- |
 | M0 | Scaffold: `CLAUDE.md` (stack, commands, map), `pyproject.toml` (uv, py3.12) + `uv.lock`, package skeleton, one passing test, `.claude/skills/domain/` (ontology + glossary from §3–4), `specs/001-offline-core/{spec,plan,tasks}.md`, `.gitignore` additions (`*.db`, `*.pem`, `*.pfx`, `*.key`, `CLAUDE.local.md`, `.claude/settings.local.json`). Install approved (Q13). | S | `uv run pytest -q` is green. `git status` clean. Diff has no GUIDs, emails or private paths. |
 | M1 | Fixture generator + safe MSPDI parser. Malicious-XML tests. | M | Fixture determinism test, parser tests, XXE/billion-laughs rejected. |
-| M2 | SQLite schema + read-only triggers + `import`, `baseline lock`, `rebaseline --confirm`. | M | Trigger tests with the default `recursive_triggers = OFF`: direct UPDATE/DELETE on `project`, `task`, `baseline` and `baseline_task` rows raises (except the one-time `import_finished_at` set and the lock); INSERT OR REPLACE with an existing key raises on all four tables; INSERT OR REPLACE with an explicit rowid ("table <t> has no column named rowid") and UPDATE OR REPLACE SET rowid ("no such column: rowid") fail on all four (WITHOUT ROWID), and a schema check finds `wr` = 1 in `PRAGMA table_list` for the four tables and that every `PRAGMA index_list` row with `unique` = 1 has origin `pk`; INSERT into a locked or missing baseline, or into `task` after import or for a missing project, raises. Import round-trip of C14N bytes. |
+| M2 | SQLite schema + read-only triggers + `import`, `baseline lock`, `rebaseline --confirm`. | M | Trigger tests with the default `recursive_triggers = OFF`: direct UPDATE/DELETE on `project`, `task`, `baseline` and `baseline_task` rows raises (except the one-time `import_finished_at` set and the lock, and each of those two raises when paired with a change to any other column, including an `UPDATE OR REPLACE` renumber); INSERT OR REPLACE with an existing key raises on all four tables; INSERT OR REPLACE with an explicit rowid ("table <t> has no column named rowid") and UPDATE OR REPLACE SET rowid ("no such column: rowid") fail on all four (WITHOUT ROWID), and a schema check finds `wr` = 1 in `PRAGMA table_list` for the four tables and that every `PRAGMA index_list` row with `unique` = 1 has origin `pk`; INSERT into a locked or missing baseline, or into `task` after import or for a missing project, raises, and so does a second `project` row or a `baseline` row inserted locked or numbered outside 0–10. Import round-trip of C14N bytes. |
 | M3 | Guard engine (pure) with rules G0–G7 + unit tests + P1, P2, P4, P5 + teeth test. | M | Property tests pass. The broken applier makes P1/P2 fail. |
 | M4 | `SourceAdapter` + file source + `sync now`/`daily`, run records, lock file, `rerun`, `runs`/`conflicts` CLI + P3, P6 + state machine. | L | All properties are green. Crash-and-rerun test. |
 | M5 | Read-only FastAPI report + `demo`. Screenshots taken with the `run` skill or by the repo owner. | M | Report tests (405s, escaping, overdue with fixed today). `demo` serves. |

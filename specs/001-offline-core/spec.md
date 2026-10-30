@@ -135,6 +135,13 @@ or any baseline.
   though never a changed or deleted row; `baseline lock` ends that.
 - Direct SQL INSERT of a `task` row unless its project exists with
   `import_finished_at` not set: the trigger aborts.
+- Direct SQL INSERT of a second `project` row, or of a `baseline` row that
+  is already locked (`locked_at` or `locked_by` set) or numbered outside
+  0–10: the trigger aborts. A new, unlocked baseline numbered 0–10 is
+  accepted, since that is how `rebaseline` appends one.
+- The one-time lock or the one-time set of `import_finished_at` together
+  with a change to any other column, including an `UPDATE OR REPLACE` that
+  renumbers a baseline onto a locked one: the trigger aborts.
 - Dates in MSPDI are local without offset. At run time "today" is the
   current date in America/Chicago (zoneinfo), whatever the host's time
   zone. Every test injects the clock; no test reads the host clock or time
@@ -150,7 +157,10 @@ or any baseline.
   `recursive_triggers = OFF`: UPDATE or DELETE on `task`, `baseline_task`
   and `baseline` (except the one-time lock); DELETE of the `project` row,
   `UPDATE project SET id = ...`, any change to its raw bytes or hash, and a
-  second set of `import_finished_at`; `INSERT OR REPLACE` with an existing
+  second set of `import_finished_at`; the lock or the `import_finished_at`
+  set paired with a change to any other column (including an `UPDATE OR
+  REPLACE` renumber); a second `project` row; a `baseline` row inserted
+  locked or numbered outside 0–10; `INSERT OR REPLACE` with an existing
   key on all four tables (a locked baseline stays locked); `INSERT OR
   REPLACE` with an explicit rowid on all four tables (including the
   project delete and re-insert) and `UPDATE OR REPLACE ... SET rowid`; a

@@ -109,24 +109,49 @@ REFUSED = {
     ),
     "baseline-renumber": ("UPDATE baseline SET number = 7 WHERE number = 0", "baseline: only the one-time lock"),
     "baseline-reason": ("UPDATE baseline SET reason = 'x' WHERE number = 0", "baseline: only the one-time lock"),
+    # The one-time lock together with a change to any other column.
     "baseline-lock-and-reason": (
         "UPDATE baseline SET locked_at = 't9', locked_by = 'x', reason = 'x' WHERE number = 0",
         "baseline: only the one-time lock",
     ),
+    "baseline-lock-and-project": (
+        "UPDATE baseline SET locked_at = 't9', locked_by = 'x', project_id = 2 WHERE number = 0",
+        "baseline: only the one-time lock",
+    ),
+    "baseline-lock-and-number": (
+        "UPDATE baseline SET locked_at = 't9', locked_by = 'x', number = 7 WHERE number = 0",
+        "baseline: only the one-time lock",
+    ),
+    # Renumbering onto locked Baseline 1 would delete it through REPLACE.
+    "baseline-lock-and-renumber-replace": (
+        "UPDATE OR REPLACE baseline SET locked_at = 't9', locked_by = 'x', number = 1 WHERE number = 0",
+        "baseline: only the one-time lock",
+    ),
+    "baseline-lock-and-created-at": (
+        "UPDATE baseline SET locked_at = 't9', locked_by = 'x', created_at = 't9' WHERE number = 0",
+        "baseline: only the one-time lock",
+    ),
     "baseline-lock-without-by": ("UPDATE baseline SET locked_at = 't9' WHERE number = 0", "baseline: only the one-time lock"),
+    "baseline-by-without-lock": ("UPDATE baseline SET locked_by = 'x' WHERE number = 0", "baseline: only the one-time lock"),
     # baseline_task: insert only
     "baseline-task-update-locked": ("UPDATE baseline_task SET finish = 'later' WHERE number = 1", "baseline_task: rows are read-only"),
     "baseline-task-update-unlocked": ("UPDATE baseline_task SET xml_c14n = x'09' WHERE number = 0", "baseline_task: rows are read-only"),
     "baseline-task-delete": ("DELETE FROM baseline_task WHERE number = 0", "baseline_task: rows are never deleted"),
     # INSERT OR REPLACE (and upsert) with an existing key
-    "project-replace": (f"INSERT OR REPLACE INTO project VALUES {ROW['project']}", "project: id already exists"),
+    "project-replace": (
+        f"INSERT OR REPLACE INTO project VALUES {ROW['project']}", "project: this database already holds a project"
+    ),
     "project-replace-text-key": (
-        "REPLACE INTO project VALUES ('1', 'P', 'other-hash', x'00', 't0', NULL)", "project: id already exists"
+        "REPLACE INTO project VALUES ('1', 'P', 'other-hash', x'00', 't0', NULL)",
+        "project: this database already holds a project",
+    ),
+    "project-second": (
+        "INSERT INTO project VALUES (2, 'Q', 'hash', x'00', 't0', NULL)", "project: this database already holds a project"
     ),
     "task-replace": (f"INSERT OR REPLACE INTO task VALUES {ROW['task']}", "task: (already exists|added only while)"),
     "baseline-replace-locked": (f"INSERT OR REPLACE INTO baseline VALUES {ROW['baseline']}", "baseline: number already exists"),
     "baseline-replace-unlocked": (
-        "REPLACE INTO baseline VALUES (1, 0, 't9', 'x', 'other', 't0')", "baseline: number already exists"
+        "REPLACE INTO baseline VALUES (1, 0, NULL, NULL, 'other', 't9')", "baseline: number already exists"
     ),
     "baseline-upsert-unlock": (
         f"INSERT INTO baseline VALUES {ROW['baseline']} ON CONFLICT DO UPDATE SET locked_at = NULL, locked_by = NULL",
@@ -149,6 +174,32 @@ REFUSED = {
         "task: added only while its project is being imported",
     ),
     "baseline-missing-project": ("INSERT INTO baseline VALUES (2, 0, NULL, NULL, NULL, 't0')", "baseline: project does not exist"),
+    # A new baseline goes in unlocked and numbered 0-10.
+    "baseline-insert-locked": (
+        "INSERT INTO baseline VALUES (1, 5, 't1', 'x', 'r', 't0')", "baseline: inserted unlocked"
+    ),
+    "baseline-insert-locked-at-only": (
+        "INSERT INTO baseline VALUES (1, 5, 't1', NULL, 'r', 't0')", "baseline: inserted unlocked"
+    ),
+    "baseline-insert-locked-by-only": (
+        "INSERT INTO baseline VALUES (1, 5, NULL, 'x', 'r', 't0')", "baseline: inserted unlocked"
+    ),
+    "baseline-insert-number-11": (
+        "INSERT INTO baseline VALUES (1, 11, NULL, NULL, 'r', 't0')", "baseline: number is not an integer from 0 to 10"
+    ),
+    "baseline-insert-number-negative": (
+        "INSERT INTO baseline VALUES (1, -1, NULL, NULL, 'r', 't0')", "baseline: number is not an integer from 0 to 10"
+    ),
+    "baseline-insert-number-fraction": (
+        "INSERT INTO baseline VALUES (1, 2.5, NULL, NULL, 'r', 't0')", "baseline: number is not an integer from 0 to 10"
+    ),
+    "baseline-insert-number-text": (
+        "INSERT INTO baseline VALUES (1, 'two', NULL, NULL, 'r', 't0')", "baseline: number is not an integer from 0 to 10"
+    ),
+    "baseline-insert-number-huge": (
+        "INSERT INTO baseline VALUES (1, 99999999999999999999, NULL, NULL, 'r', 't0')",
+        "baseline: number is not an integer from 0 to 10",
+    ),
     "baseline-task-locked-baseline": (
         "INSERT INTO baseline_task VALUES (1, 1, 3, 's', 'f', 'd', 'w', '5', x'02')",
         "baseline_task: its baseline is missing or locked",
@@ -170,11 +221,28 @@ def test_refuses_writes_to_protected_rows(db, sql, message):
 
 
 REFUSED_DURING_IMPORT = {
+    # Finishing the import together with a change to any other column.
+    "project-finish-and-id": ("UPDATE project SET import_finished_at = 't9', id = 2", "project: only import_finished_at"),
+    "project-finish-and-name": (
+        "UPDATE project SET import_finished_at = 't9', name = 'other'", "project: only import_finished_at"
+    ),
+    "project-finish-and-hash": (
+        "UPDATE project SET import_finished_at = 't9', source_sha256 = 'other'", "project: only import_finished_at"
+    ),
     "project-finish-and-bytes": (
         "UPDATE project SET import_finished_at = 't9', source_xml = x'00'", "project: only import_finished_at"
     ),
+    "project-finish-and-imported-at": (
+        "UPDATE project SET import_finished_at = 't9', imported_at = 't9'", "project: only import_finished_at"
+    ),
     "project-name": ("UPDATE project SET name = 'other'", "project: only import_finished_at"),
-    "project-replace": (f"INSERT OR REPLACE INTO project VALUES {ROW['project']}", "project: id already exists"),
+    "project-finish-left-unset": ("UPDATE project SET import_finished_at = NULL", "project: only import_finished_at"),
+    "project-replace": (
+        f"INSERT OR REPLACE INTO project VALUES {ROW['project']}", "project: this database already holds a project"
+    ),
+    "project-second": (
+        "INSERT INTO project VALUES (2, 'Q', 'hash', x'00', 't0', NULL)", "project: this database already holds a project"
+    ),
     "task-replace": (f"INSERT OR REPLACE INTO task VALUES {ROW['task']}", "task: already exists"),
     "task-missing-project": (
         "INSERT INTO task VALUES (2, 1, 'T', '1', 1, 0, 0, 's', 'f', 'd', 'w', x'01')",

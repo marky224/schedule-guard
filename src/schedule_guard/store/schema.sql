@@ -1,9 +1,20 @@
 -- schedule-guard SQLite schema, version 1 (PLAN.md section 4).
 --
 -- project, task, baseline and baseline_task hold the imported file, the
--- master schedule and the baselines. Only import, baseline lock and
--- rebaseline write them; the triggers refuse every other write, on any
--- connection that leaves triggers enabled (the default).
+-- master schedule and the baselines. On any connection that leaves triggers
+-- enabled (the default), their triggers refuse:
+--   * every DELETE;
+--   * every UPDATE but two, each with every other column unchanged: setting
+--     project.import_finished_at once, and locking a baseline once
+--     (locked_at and locked_by, from NULL);
+--   * an INSERT whose primary key already exists, a second project, a task
+--     once its project's import has finished, a baseline that is already
+--     locked or numbered outside 0-10 (MS Project's Baseline plus
+--     Baseline1-10, UNVERIFIED until M7), or a baseline_task row for a
+--     missing task or a missing or locked baseline.
+-- They don't refuse a new, unlocked baseline numbered 0-10 with rows for
+-- existing tasks: that is how rebaseline appends one, and the schema can't
+-- tell which program is writing.
 --
 -- With SQLite's default recursive_triggers = OFF, a REPLACE deletes the row
 -- it conflicts with without firing that row's DELETE trigger. So every
@@ -21,9 +32,10 @@ CREATE TABLE project (
     import_finished_at TEXT                     -- set once, as the last step of import
 ) WITHOUT ROWID;
 
-CREATE TRIGGER project_insert_new_key BEFORE INSERT ON project
-WHEN EXISTS (SELECT 1 FROM project WHERE id = NEW.id)
-BEGIN SELECT RAISE(ABORT, 'project: id already exists'); END;
+-- A database holds one project (Q14), so this also refuses an existing key.
+CREATE TRIGGER project_insert_only_one BEFORE INSERT ON project
+WHEN EXISTS (SELECT 1 FROM project)
+BEGIN SELECT RAISE(ABORT, 'project: this database already holds a project'); END;
 
 CREATE TRIGGER project_update_finish_import_once BEFORE UPDATE ON project
 WHEN NOT (OLD.import_finished_at IS NULL AND NEW.import_finished_at IS NOT NULL
@@ -82,6 +94,15 @@ BEGIN SELECT RAISE(ABORT, 'baseline: number already exists'); END;
 CREATE TRIGGER baseline_insert_for_project BEFORE INSERT ON baseline
 WHEN NOT EXISTS (SELECT 1 FROM project WHERE id = NEW.project_id)
 BEGIN SELECT RAISE(ABORT, 'baseline: project does not exist'); END;
+
+CREATE TRIGGER baseline_insert_unlocked BEFORE INSERT ON baseline
+WHEN NEW.locked_at IS NOT NULL OR NEW.locked_by IS NOT NULL
+BEGIN SELECT RAISE(ABORT, 'baseline: inserted unlocked; only the one-time lock locks it'); END;
+
+-- Column affinity is applied before this runs, so '5' arrives as 5.
+CREATE TRIGGER baseline_insert_number_range BEFORE INSERT ON baseline
+WHEN typeof(NEW.number) <> 'integer' OR NEW.number NOT BETWEEN 0 AND 10
+BEGIN SELECT RAISE(ABORT, 'baseline: number is not an integer from 0 to 10'); END;
 
 CREATE TRIGGER baseline_update_lock_once BEFORE UPDATE ON baseline
 WHEN NOT (OLD.locked_at IS NULL AND OLD.locked_by IS NULL
