@@ -197,9 +197,10 @@ or any baseline.
   round-trip; rebaseline refuses without `--confirm`/`--reason` and past
   number 10.
 - M3: unit tests for G0–G7, including the Q6 checks with a fixed clock;
-  Hypothesis P1 (baseline bytes and SHA-256 identical), P2 (master schedule
-  bytes identical), P4 (all or nothing), P5 (stale never applies) pass; with
-  a deliberately broken applier, P1 or P2 fails and the trigger raises.
+  Hypothesis P1 (baseline bytes and SHA-256 identical, and every baseline
+  column), P2 (master schedule bytes and every task column identical), P4
+  (all or nothing), P5 (stale never applies) pass; with a deliberately
+  broken applier, P1 or P2 fails and the trigger raises.
 - M4: P3 (idempotent) and P6 (rerun equivalence, crash then rerun) pass; the
   `RuleBasedStateMachine` keeps P1–P5 after every step; a concurrent second
   run is refused.

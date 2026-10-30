@@ -362,12 +362,14 @@ specific tests it names.
 Property tests (Hypothesis). Strategies generate arbitrary sequences of
 updates: valid, stale, duplicate, unknown task, forbidden fields, bad values,
 and mixed fields. Each test runs them through the real sync engine on a
-temp-file SQLite DB loaded from the fixture.
+temp-file SQLite DB loaded from the fixture. Until the sync engine exists
+(M4), the M3 tests run them through the guard and the applier
+(`progress.py`) the same way, one transaction per update.
 
 | ID | Property |
 | --- | --- |
-| P1 | **Baseline is byte-identical.** Concatenated `baseline_task.xml_c14n` (ordered) plus `project.source_xml` give the same bytes and SHA-256 before and after any sequence. |
-| P2 | **Master schedule is byte-identical.** Same as P1 for `task.plan_c14n`. |
+| P1 | **Baseline is byte-identical.** Concatenated `baseline_task.xml_c14n` (ordered) plus `project.source_xml` give the same bytes and SHA-256 before and after any sequence, and every column of every `baseline` and `baseline_task` row is unchanged (a write to a column such as `baseline_task.finish` leaves the C14N bytes alone). |
+| P2 | **Master schedule is byte-identical.** Same as P1 for `task.plan_c14n` and every column of every `task` row, such as `planned_finish`. |
 | P3 | **Idempotent.** Replaying the sequence, duplicating items, or running sync twice leaves the same state as one pass. |
 | P4 | **All or nothing.** Every update gets exactly one outcome. An update with any forbidden field changes no progress field. |
 | P5 | **Stale never applies.** No update with `made_against_version` ≠ current version at decision time is ever applied. |
