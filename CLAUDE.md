@@ -26,9 +26,10 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 
 ## Map
 - src/schedule_guard/ — application code (`cli.py`, `mspdi/parse.py` safe
-  MSPDI reader; schemas added in M2 are the executable domain model)
-- tests/ — oracles (smoke, fixture and MSPDI parser tests now; property
-  tests from M3)
+  MSPDI reader, `store/schema.sql` SQLite schema and read-only triggers,
+  the executable domain model, opened by `store/db.py`)
+- tests/ — oracles (smoke, fixture, MSPDI parser and store trigger tests
+  now; property tests from M3)
 - tests/fixtures/ — generated, fictional inputs (`riverbend-clinic.xml`)
 - scripts/ — `make_fixture.py`, the seeded fixture generator
 - specs/001-offline-core/ — spec.md, plan.md, tasks.md for M1–M6

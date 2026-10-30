@@ -78,7 +78,7 @@ Everything runs on one Linux PC. All network calls go out from it: Graph,
 the Entra token endpoint, and the Workflows trigger URL. Nothing listens for
 inbound traffic. The report binds to `127.0.0.1`.
 
-### Layout (`[M0]`, `[M1]` = exists since that milestone; everything else comes in later runs)
+### Layout (`[M0]`, `[M1]`, `[M2]` = exists since that milestone; everything else comes in later runs)
 
 ```
 pyproject.toml, uv.lock              [M0] uv-managed, Python 3.12
@@ -90,7 +90,7 @@ src/schedule_guard/                  [M0]
   cli.py                             [M0] argparse entry point: `schedule-guard ...` (`--version` only so far)
   mspdi/parse.py                     [M1] safe MSPDI reader (defusedxml)
   mspdi/export.py                    progress-only MSPDI writer (Phase 2)
-  store/schema.sql, store/db.py      SQLite schema, read-only triggers
+  store/schema.sql, store/db.py      [M2] SQLite schema, read-only triggers; open/migrate, transactions
   guard.py                           pure rules: (task state, update) -> outcome
   sync.py                            runs, idempotency, rerun
   sources/base.py                    SourceAdapter protocol
@@ -103,7 +103,7 @@ src/schedule_guard/                  [M0]
   demo.py                            loads fake data for screenshots
 scripts/make_fixture.py              [M1] deterministic fixture generator
 tests/fixtures/                      [M1] generated MSPDI + update files (fake data only; `riverbend-clinic.xml` so far)
-tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py`, `test_fixture.py`, `test_mspdi_parse.py` so far)
+tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py`, `test_fixture.py`, `test_mspdi_parse.py`, `test_store_triggers.py` so far)
 deploy/systemd/                      user .service + .timer (Phase 2)
 docs/tenant-setup.md                 Phase 2 runbook for the tenant admin
 docs/spike-graph-selected.md         Phase 2 spike results
