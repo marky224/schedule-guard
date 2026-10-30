@@ -17,7 +17,7 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
   any dependency)
 - Dev: `uv run schedule-guard --help`; database commands take
   `--db <path>`: keep the file outside the repo (`*.db` is gitignored)
-- Test all: `uv run pytest -q`
+- Test all: `uv run pytest -q` (Hypothesis is derandomized: the same examples every run)
 - Test one: `uv run pytest -q tests/test_smoke.py::test_cli_version_prints_package_version`
 - Regenerate the MSPDI fixture: `uv run python scripts/make_fixture.py`
   (seeded; `tests/test_fixture.py` fails if the checked-in bytes differ)
@@ -29,9 +29,12 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 - src/schedule_guard/ — application code (`cli.py`, `mspdi/parse.py` safe
   MSPDI reader, `store/schema.sql` SQLite schema and read-only triggers,
   the executable domain model, opened by `store/db.py`; `importer.py`,
-  `baselines.py`)
-- tests/ — oracles (smoke, fixture, MSPDI parser, store trigger, import and
-  baseline tests now; property tests from M3)
+  `baselines.py`; `clock.py`, `guard.py` the pure guard G0–G7,
+  `progress.py` the applier)
+- tests/ — oracles (smoke, fixture, MSPDI parser, store trigger, import,
+  baseline, clock, guard rule and applier tests; `conftest.py` shared
+  fixtures and the Hypothesis profile)
+- tests/properties/ — Hypothesis P1, P2, P4, P5 and the teeth test
 - tests/fixtures/ — generated, fictional inputs (`riverbend-clinic.xml`)
 - scripts/ — `make_fixture.py`, the seeded fixture generator
 - specs/001-offline-core/ — spec.md, plan.md, tasks.md for M1–M6

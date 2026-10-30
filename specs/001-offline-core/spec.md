@@ -1,7 +1,7 @@
 # Spec: 001 offline core (PLAN.md milestones M1–M6)
 
 Status: derived from the approved PLAN.md (approved 2026-10-23); M1 done
-2026-10-29, M2 done 2026-10-30, M3–M6 not started.
+2026-10-29, M2 and M3 done 2026-10-30, M4–M6 not started.
 Source plan: [PLAN.md](../../PLAN.md) §1–8, §11. Terms: `.claude/skills/domain/`.
 
 ## Problem

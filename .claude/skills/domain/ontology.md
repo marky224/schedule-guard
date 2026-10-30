@@ -1,8 +1,9 @@
 # Domain ontology: schedule-guard
 
-Status: current for `project`, `task`, `baseline` and `baseline_task`
-(`src/schedule_guard/store/schema.sql`, M2); the other entities are still
-planned (PLAN.md §3–5)
+Status: current for `project`, `task`, `baseline`, `baseline_task` and
+`task_progress` (`src/schedule_guard/store/schema.sql`, M2–M3) and for the
+guard's outcomes (`src/schedule_guard/guard.py`, M3); the other entities are
+still planned (PLAN.md §3–5)
 Last verified: 2026-10-30
 Executable source of truth: src/ schemas. If this page disagrees with code, code wins.
 
@@ -40,9 +41,9 @@ Executable source of truth: src/ schemas. If this page disagrees with code, code
 Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 
 ## Entities (tables, PLAN.md §4)
-- In the schema: `project`, `task` (master schedule), `baseline`, `baseline_task`
+- In the schema: `project`, `task` (master schedule), `baseline`, `baseline_task`,
+  `task_progress` (progress fields + task version, from 0 at import)
 - Planned:
-  - `task_progress` (progress fields + task version)
   - `source_update`, `outcome`, `conflict`
   - `sync_run`, `run_item`, `source_cursor`, `writeback` (Phase 2 outbox)
 
@@ -101,9 +102,10 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
   made-against version equals the current task version (all or nothing).
 - A key is applied at most once: the apply and its outcome commit in one
   SQLite transaction.
-- G5/G6 validation: % complete 0–100, remaining work ≥ 0, valid dates,
-  actual dates not later than today (injectable clock), actual finish ≥
-  actual start, 100 % requires an actual finish.
+- G5/G6 validation: % complete 0–100, remaining work 0 to 1,000,000 hours,
+  valid dates, actual dates not later than today (injectable clock,
+  America/Chicago), actual finish ≥ actual start, 100 % requires an actual
+  finish. An update can't clear a field.
 - Progress on summary tasks is rejected (`summary_task`).
 - `notes` is appended as dated entries; existing text is never replaced.
 - Re-baseline appends and locks the new baseline; old baselines never

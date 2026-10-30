@@ -28,7 +28,9 @@
   `src/schedule_guard/importer.py`, `src/schedule_guard/baselines.py`,
   `tests/test_store_triggers.py`, `tests/test_import.py`, `tests/test_baselines.py`
 - Create (M3): `src/schedule_guard/guard.py`, `src/schedule_guard/clock.py`,
-  `tests/test_guard_rules.py`, `tests/properties/test_invariants.py`,
+  `src/schedule_guard/progress.py`, `tests/test_guard_rules.py`,
+  `tests/test_clock.py`, `tests/test_progress.py`,
+  `tests/properties/harness.py`, `tests/properties/test_invariants.py`,
   `tests/properties/test_teeth.py`, `tests/conftest.py`
 - Create (M4): `src/schedule_guard/sources/__init__.py`,
   `src/schedule_guard/sources/base.py`, `src/schedule_guard/sources/file.py`,
