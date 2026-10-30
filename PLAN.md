@@ -1,12 +1,14 @@
 # schedule-guard: plan
 
-Drafted: 2026-10-23. Status: **proposed, awaiting approval**. No code yet.
+Drafted: 2026-10-23. Status: **approved** by the repo owner on 2026-10-23;
+decisions recorded in §15 on 2026-10-29. Implementation starts with M0.
 
 Goal: a portfolio-grade Python service that proves field progress updates can
 never overwrite a project's master schedule or its baseline.
 
 Scope of release: **v1.0 = Phase 1 + Phase 2**, plus a README with an
-architecture diagram and an outline for a field-log post. Phase 3 is a sketch.
+architecture diagram and an outline for a field-log post. Phase 3 is dropped
+from this project (§10, Q9).
 
 Microsoft Learn claims were checked on 2026-10-23 with the microsoft-learn MCP.
 Each one cites a source `[L#]` (list at the end). Claims marked **UNVERIFIED**
@@ -95,7 +97,7 @@ scripts/make_fixture.py              deterministic fixture generator
 tests/fixtures/                      generated MSPDI + update files (fake data only)
 tests/                               unit, property (Hypothesis), report tests
 deploy/systemd/                      user .service + .timer (Phase 2)
-docs/tenant-setup.md                 Phase 2 admin runbook for Mark
+docs/tenant-setup.md                 Phase 2 runbook for the tenant admin
 docs/spike-graph-selected.md         Phase 2 spike results
 docs/field-log-outline.md            post outline (v1.0)
 ```
@@ -106,7 +108,7 @@ CLI (Phase 1):
 | --- | --- |
 | `schedule-guard import <file.xml>` | Parses the MSPDI file, then stores the project, master schedule, baselines and raw file bytes. Works only on an empty project. |
 | `schedule-guard baseline lock [--number N]` | Locks a baseline that was imported. Locked baselines are read-only. |
-| `schedule-guard rebaseline --confirm --reason "..."` | Admin only. Appends a new baseline number built from the current planned values. Old baselines never change. |
+| `schedule-guard rebaseline --confirm --reason "..."` | Admin only. Appends a new baseline number built from the current planned values. Old baselines never change (Q7). Refuses past baseline number 10 (Project's Baseline + Baseline1–10: **UNVERIFIED**, [L14] gives no range; checked in M7). |
 | `schedule-guard sync now [--source file:<path>]` | Runs a sync immediately. Records a run with an id. |
 | `schedule-guard sync daily` | Same as `sync now`, labelled `daily`. The timer calls this one. |
 | `schedule-guard rerun <run-id>` | Reprocesses the source items that run captured. Keys already decided count as duplicates. Records a new run with `rerun_of`. |
@@ -117,9 +119,10 @@ CLI (Phase 1):
 
 Runtime deps: `fastapi`, `uvicorn`, `jinja2`, `defusedxml`. Phase 2 adds `msal`
 and `httpx`. Dev deps: `pytest`, `hypothesis`, `httpx` (for TestClient).
-Nothing is installed in this run.
+M0 resolves and locks these from PyPI once (Q13). Later runs sync from
+`uv.lock`; any new dependency is asked for first.
 
-## 3. Domain terms (draft ontology; M0 moves this into `.claude/skills/domain/`)
+## 3. Domain terms (canonical copy: `.claude/skills/domain/`, from M0)
 
 | Term | Meaning | Not to be confused with |
 | --- | --- | --- |
@@ -201,9 +204,9 @@ with writing the outcome.
 | G2 | The task UID doesn't exist in the project. | conflict `unknown_task` |
 | G3 | Any field is outside the allowlist, e.g. `planned_finish`, `name`, a baseline field, or an unknown column. | conflict `field_not_allowed` (all fields of the update listed) |
 | G4 | `made_against_version` ≠ the task's current version. | conflict `stale_version` |
-| G5 | A value is out of range or the wrong type: % complete outside 0–100, unparseable date, negative remaining work. | conflict `invalid_value` |
-| G6 | `actual_finish` is before `actual_start` (after merging with current values). | conflict `inconsistent_actuals` |
-| G7 | The target is a summary task. Project rolls summary tasks up from their subtasks. | conflict `summary_task` (default; see Q4) |
+| G5 | A value is out of range or the wrong type: % complete outside 0–100, unparseable date, negative remaining work, or an actual start/finish later than today (Q6; "today" is an injectable clock). | conflict `invalid_value` |
+| G6 | After merging with current values: `actual_finish` is before `actual_start`, or % complete is 100 without an `actual_finish` (Q6). | conflict `inconsistent_actuals` |
+| G7 | The target is a summary task. Project rolls summary tasks up from their subtasks (Q4). | conflict `summary_task` |
 | G8 | Phase 2 only: the same `source_item_id` was already decided at a different item version, so a user edited the row in place. | conflict `edited_after_submit` |
 | — | Otherwise | `applied`: write the progress fields, bump `version` by 1, store before/after |
 
@@ -214,8 +217,8 @@ Rules that hold no matter which check fires:
 - Within one run, updates are processed in `(submitted_at, source_item_id)`
   order. If two updates were made against the same version, the first is
   applied and the second becomes `stale_version`. This is intended.
-- `notes` is appended as `[date, source, submitter] text` by default. It never
-  replaces existing text (see Q3).
+- `notes` is appended as `[date, source, submitter] text`. It never replaces
+  existing text (Q3).
 - Re-baselining exists only as `rebaseline --confirm --reason`. It appends.
   The sync, rerun and report code paths never import or call it.
 - A rerun never turns a conflict into an apply. Conflict keys already have
@@ -254,7 +257,8 @@ Rules that hold no matter which check fires:
   `fields{}`, `submitted_at`, `submitted_by` (fake crew names). The file
   source returns every line on every run. That is deliberate: it exercises
   idempotency.
-- A real Project export is optional and comes later (Q1).
+- No real Project export: the repo owner has no MS Project desktop (Q1). The
+  generated fixture is the only MSPDI input.
 
 ## 7. Report (FastAPI, read-only)
 
@@ -311,7 +315,7 @@ Plus:
 
 ## 9. Phase 2 (detailed; built after Phase 1)
 
-### 9.1 Tenant shape (Mark sets this up once; runbook in `docs/tenant-setup.md`)
+### 9.1 Tenant shape (the tenant admin sets this up once; runbook in `docs/tenant-setup.md`)
 
 - The existing tenant gets a dedicated Team, "Schedule Guard Demo", with two
   Microsoft Lists pinned as channel tabs (tab pinning: **UNVERIFIED** on Learn;
@@ -322,11 +326,14 @@ Plus:
   Tasks), `MadeAgainstVersion` (number), `PercentComplete`, `ActualStart`,
   `ActualFinish`, `RemainingWork` (hours), `Notes` (plain multi-line), and
   `Status` (Pending/Applied/Conflict/Duplicate) plus `Reason`, which only the
-  service writes.
+  service writes. It also has a demo column, `Proposed Finish` (Q16). The
+  service never maps it to a progress field, so any value in it becomes a
+  `field_not_allowed` conflict.
 - Why append-only: delta "shows the latest state for each item, not each
   change" [L1]. If users edited rows in place, intermediate versions would be
   lost. Rule G8 turns any in-place edit into a conflict, so the guard holds
-  even when list permissions allow users to edit their own rows (Q11).
+  even when list permissions allow users to edit their own rows. Users keep
+  SharePoint's default rights (Q11).
 
 ### 9.2 Identity and permissions
 
@@ -344,8 +351,8 @@ Plus:
   `Sites.Selected` with `write` on the demo team's site [L2]. Never
   `Sites.Read.All` or `Sites.ReadWrite.All`.
 - Assigning app permissions to a list breaks permission inheritance on that
-  list [L2]. That is acceptable here, and Mark sets user permissions on each
-  list anyway.
+  list [L2]. That is acceptable here, and the tenant admin sets user
+  permissions on each list anyway.
 
 ### 9.3 First Phase 2 milestone: the Selected-scope spike
 
@@ -361,8 +368,8 @@ What Learn shows:
   application, and the role allows for the operation requested" [L2].
 
 So **whether the Selected scope works for delta, list, create and PATCH is
-UNVERIFIED** until we test it. The spike runs with Mark's go-ahead and his
-`.env`, app-only with the Selected grant. It records results in
+UNVERIFIED** until we test it. The spike runs with the repo owner's go-ahead
+and their `.env`, app-only with the Selected grant. It records results in
 `docs/spike-graph-selected.md`:
 
 1. `GET /sites/{id}/lists/{id}/items?expand=fields` on both lists.
@@ -381,7 +388,7 @@ Decision table:
 | --- | --- |
 | Delta works under the Selected grant | Use delta. |
 | Delta denied, items list works | **Fallback:** list items with `$filter` on `Modified` greater than the last high-water mark, under the same grant. `$filter` on fields is supported and works best on indexed columns [L4], so index `Modified`. |
-| Items list denied at list level | Ask Mark to approve `Sites.Selected` (write, demo site only), then repeat the spike. |
+| Items list denied at list level | Show the spike results to the repo owner first, then use `Sites.Selected` (write, demo site only; approved in Q12) and repeat the spike. |
 | All denied | Stop Phase 2 and report. Never fall back to `Sites.Read.All`. |
 
 ### 9.4 Graph source adapter
@@ -418,7 +425,8 @@ Decision table:
 ### 9.6 Alerts
 
 - **Conflicts:** status and reason are written onto the Update row, and a
-  List rule ("when Status changes to Conflict, email Mark") sends the email.
+  List rule ("when Status changes to Conflict, email the repo owner") sends
+  the email.
   **UNVERIFIED:** Learn has no first-party page on List rules. Whether a rule
   fires on app-made edits needs a test in M13. Fallback: post a conflict
   digest through the same Workflows URL. That needs no extra Graph scope and
@@ -427,7 +435,8 @@ Decision table:
   webhook request is received" posts to the channel [L10][L11]. The trigger
   accepts POST only. Its auth can be "anyone", "any user in my tenant" or
   "specific users"; the tenant options need a bearer token [L11]. Default:
-  "anyone", with the URL kept as a secret in `.env` (Q10). Messages stay
+  "anyone", with the URL kept as a secret in `.env` (Q10). Worst case if it
+  leaks: a fake alert in the demo channel. Messages stay
   under about 28 KB [L10][L11]. The flow is owned by a user, so add a
   co-owner to avoid an orphan flow [L10].
 - **Not used:** app-only `POST /teams/{id}/channels/{id}/messages`. Its only
@@ -443,8 +452,8 @@ Decision table:
 - Re-parse the stored original bytes, set only the five progress elements on
   each task, and serialize with the default namespace registered. Baseline and
   planned elements stay C14N-identical (P7).
-- "Openable in Project" needs MS Project desktop to confirm. Without it, the
-  claim stays **UNVERIFIED** (Q1, Challenge C3).
+- "Openable in Project" needs MS Project desktop to confirm. The repo owner
+  doesn't have it (Q1), so the claim stays **UNVERIFIED** (Challenge C3).
 - Risk: Project may recalculate dependent fields when it opens the file
   (actual duration, remaining duration). We write only the allowlisted
   elements and document that Project derives the rest.
@@ -454,10 +463,10 @@ Decision table:
 - systemd **user** units: `deploy/systemd/schedule-guard-sync.service` runs
   `schedule-guard sync daily`, and the `.timer` uses
   `OnCalendar=*-*-* 06:00:00 America/Chicago` (time from Q2;
-  `Persistent=true`). `loginctl enable-linger` lets it run without a login
-  session. The timezone-in-OnCalendar support and linger behaviour are
-  **UNVERIFIED** (not Microsoft claims); check them on this PC's systemd
-  version in M14.
+  `Persistent=true`). Checked on this host on 2026-10-23: systemd 255, and
+  user linger is already on, so user timers run without a login session.
+  Whether this systemd accepts a timezone in `OnCalendar` stays
+  **UNVERIFIED** (not a Microsoft claim); check it in M14.
 - Failed runs exit non-zero and post to the Workflows URL. Runs and errors are
   in SQLite and the journal.
 
@@ -465,9 +474,13 @@ Decision table:
 
 A Power BI Desktop file reading an exported CSV, plus screenshots. Power BI
 Desktop is free [L13]. Publishing or sharing needs Pro [L13], so the plan
-does neither. This is Windows-only, so Mark would do it.
+does neither. This is Windows-only, so the repo owner would do it.
 
-## 10. Phase 3 (sketch only)
+## 10. Phase 3 (dropped, Q9)
+
+Dropped from this project on 2026-10-29: it needs `Sites.Read.All` and a
+public HTTPS endpoint, and a daily sync is enough. The field-log post
+mentions it under "next". The notes below are kept for that post.
 
 - An optional Graph change notification on the Progress Updates list. Its only
   job is to trigger the same delta sync. Lists are a supported resource
@@ -478,8 +491,7 @@ does neither. This is Windows-only, so Mark would do it.
   notifications fast (3 seconds per [L9]).
 - **Blocker found:** the create-subscription permission table lists
   `Sites.Read.All` (application) for `list` [L8]. That conflicts with "never
-  `Sites.Read.All`". Phase 3 needs its own Selected-scope spike, or gets
-  dropped (Q9).
+  `Sites.Read.All`". This is why Phase 3 is dropped (Q9).
 - It also breaks the "no public inbound endpoint" constraint, which is why it
   stays out of v1.0.
 
@@ -492,29 +504,29 @@ run.
 
 | # | Run | Size | Proof |
 | --- | --- | --- | --- |
-| M0 | Scaffold: `CLAUDE.md` (stack, commands, map), `pyproject.toml` (uv, py3.12), package skeleton, one passing test, `.claude/skills/domain/` (ontology + glossary from §3–4), `specs/001-offline-core/{spec,plan,tasks}.md`, `.gitignore` additions (`*.db`, `*.pem`, `*.pfx`, `*.key`, `CLAUDE.local.md`, `.claude/settings.local.json`). **Needs install approval (Q13).** | S | `uv run pytest -q` is green. Structure check is clean. |
+| M0 | Scaffold: `CLAUDE.md` (stack, commands, map), `pyproject.toml` (uv, py3.12) + `uv.lock`, package skeleton, one passing test, `.claude/skills/domain/` (ontology + glossary from §3–4), `specs/001-offline-core/{spec,plan,tasks}.md`, `.gitignore` additions (`*.db`, `*.pem`, `*.pfx`, `*.key`, `CLAUDE.local.md`, `.claude/settings.local.json`). Install approved (Q13). | S | `uv run pytest -q` is green. `git status` clean. Diff has no GUIDs, emails or private paths. |
 | M1 | Fixture generator + safe MSPDI parser. Malicious-XML tests. | M | Fixture determinism test, parser tests, XXE/billion-laughs rejected. |
 | M2 | SQLite schema + read-only triggers + `import`, `baseline lock`, `rebaseline --confirm`. | M | Trigger tests (direct UPDATE/DELETE on baseline/task raises). Import round-trip of C14N bytes. |
 | M3 | Guard engine (pure) with rules G0–G7 + unit tests + P1, P2, P4, P5 + teeth test. | M | Property tests pass. The broken applier makes P1/P2 fail. |
 | M4 | `SourceAdapter` + file source + `sync now`/`daily`, run records, lock file, `rerun`, `runs`/`conflicts` CLI + P3, P6 + state machine. | L | All properties are green. Crash-and-rerun test. |
-| M5 | Read-only FastAPI report + `demo`. Screenshots taken with the `run` skill or by Mark. | M | Report tests (405s, escaping, overdue with fixed today). `demo` serves. |
-| M6 | Phase 1 wrap: README "Phase 1" section, hygiene test, docs sync. | S | Full suite green. Hygiene test passes. |
+| M5 | Read-only FastAPI report + `demo`. Screenshots taken with the `run` skill or by the repo owner. | M | Report tests (405s, escaping, overdue with fixed today). `demo` serves. |
+| M6 | Phase 1 wrap: README "Phase 1" section, hygiene test, docs sync, GitHub Actions workflow running `uv run pytest -q` (Q15; the CI config gets a max-effort review). | S | Full suite green locally and in CI. Hygiene test passes. |
 
-**Phase 2: tenant integration** (M7 needs no tenant; M8 is Mark's admin work;
-M9 needs Mark's go-ahead for live calls)
+**Phase 2: tenant integration** (M7 needs no tenant; M8 is the tenant admin's
+work; M9 needs the repo owner's go-ahead for live calls)
 
 | # | Run | Size | Proof |
 | --- | --- | --- | --- |
 | M7 | MSPDI export (offline) + P7. | M | P7 green. The exported file re-imports into an empty project. |
-| M8 | `docs/tenant-setup.md` runbook + `.env.example`: app registration with certificate, Team + two lists + columns + user permissions, the one-time grant commands Mark runs, Workflows flow, List rule. Docs only. | S | Docs review. Hygiene test passes. |
+| M8 | `docs/tenant-setup.md` runbook + `.env.example`: app registration with certificate, Team + two lists + columns + user permissions, the one-time grant commands the tenant admin runs (Graph PowerShell, plus the revoke command; Q8), Workflows flow, List rule. Docs only. | S | Docs review. Hygiene test passes. |
 | M9 | **Spike** (§9.3) against the demo lists under the Selected grant. Writes `docs/spike-graph-selected.md` with the decision. | S | Recorded request/response shapes (ids redacted). Decision table filled in. |
 | M10 | Graph auth (MSAL certificate) + client (paging, retries, 410) + Graph source adapter, tested against recorded fixtures. | L | Tests green offline. No `Sites.*.All` string anywhere in the code (test). |
 | M11 | Tasks publisher + write-back outbox + own-write tracking + rule G8. | M | Unit tests for loop-freedom and 412 handling. |
-| M12 | First live sync on the demo lists (Mark's go-ahead): append rows, sync, rerun, check Status/Reason. | S | A run log showing applied, conflict and duplicate outcomes. Baseline hash unchanged. |
+| M12 | First live sync on the demo lists (repo owner's go-ahead): append rows, sync, rerun, check Status/Reason. | S | A run log showing applied, conflict and duplicate outcomes. Baseline hash unchanged. |
 | M13 | Alerts: Workflows client for failed runs. Live check that the List rule fires on an app-made edit, otherwise wire the conflict-digest fallback. | S | Captured channel post and email (or fallback post). |
 | M14 | Host: systemd user service + timer, linger, runbook. A two-day soak. | S | `systemctl --user list-timers` output. Two daily run records. |
 | M15 | v1.0 docs: README with mermaid architecture diagram, licensing and permissions tables, `docs/field-log-outline.md`. Then SHIP (PR). | S | Docs review. Full suite green. |
-| (opt) | Power BI Desktop file + screenshots (Mark, Windows). | S | — |
+| (opt) | Power BI Desktop file + screenshots (repo owner, Windows). | S | — |
 
 ## 12. Licensing (free vs premium)
 
@@ -530,18 +542,18 @@ M9 needs Mark's go-ahead for live calls)
 | Power BI Desktop | Optional dashboard | Free | [L13] |
 | Power BI Pro | Publishing/sharing | **Premium: not used** | [L13] |
 | MS Project desktop | Optional real export and "openable" check | Paid, optional (Q1) | — |
-| Graph change notifications | Phase 3 only | No licence, but needs a public HTTPS host | [L7] |
+| Graph change notifications | Phase 3 (dropped) | No licence, but needs a public HTTPS host | [L7] |
 
 ## 13. Permissions
 
 | Scope / role | Type | Grant target | Who grants | When |
 | --- | --- | --- | --- | --- |
-| `Lists.SelectedOperations.Selected` | Application, admin consent | The schedule-guard app registration | Mark (tenant admin) | M8 |
-| role `write` | Resource grant via `POST /sites/{site-id}/lists/{list-id}/permissions` [L3] | "Tasks" list | Mark, one time, interactive delegated session (Graph PowerShell `New-MgSiteListPermission` or Graph Explorer) [L3] | M8 |
-| role `write` | Same | "Progress Updates" list | Mark, same session | M8 |
-| `Sites.Selected` + `write` | Application + site grant | Demo team site only | Mark | **Only if the M9 spike fails at list level** (needs Mark's approval) |
-| Workflows trigger URL | Shared secret (not a Graph scope) | The flow on the demo channel | Mark creates the flow | M8 |
-| User permissions: Read on Tasks, add rows on Progress Updates | SharePoint list permissions | The two lists | Mark (list owner) | M8 |
+| `Lists.SelectedOperations.Selected` | Application, admin consent | The schedule-guard app registration | The tenant admin | M8 |
+| role `write` | Resource grant via `POST /sites/{site-id}/lists/{list-id}/permissions` [L3] | "Tasks" list | The tenant admin, one time, in a delegated Graph PowerShell session (`Connect-MgGraph -Scopes Sites.FullControl.All`, then `New-MgSiteListPermission` [L3]); revoked afterwards (Q8) | M8 |
+| role `write` | Same | "Progress Updates" list | The tenant admin, same session | M8 |
+| `Sites.Selected` + `write` | Application + site grant | Demo team site only | The tenant admin | **Only if the M9 spike fails at list level**, after the repo owner sees the results (Q12) |
+| Workflows trigger URL | Shared secret (not a Graph scope) | The flow on the demo channel | The tenant admin creates the flow | M8 |
+| User permissions: Read on Tasks, add rows on Progress Updates | SharePoint list permissions | The two lists | The tenant admin (list owner) | M8 |
 | **Never on the service app:** `Sites.Read.All`, `Sites.ReadWrite.All`, `Sites.FullControl.All`, `Teamwork.Migrate.All`, `Mail.Send` | — | — | — | Enforced by a code-level test (M10) |
 
 Who can call the grant API: the API page lists `Sites.ReadWrite.All` as least
@@ -550,9 +562,9 @@ privileged, with `Sites.FullControl.All` and `Sites.Manage.All` as higher
 `Sites.FullControl.All`, `Sites.Selected`+FullControl or
 `Sites.Selected`+Owner, and that in delegated calls the user also needs
 sufficient rights [L2]. The two pages disagree. Plan for the stronger one:
-Mark's one-off delegated session uses `Sites.FullControl.All` on a Microsoft
-first-party tool, never on the schedule-guard app, and he revokes it
-afterwards (Q8).
+the tenant admin's one-off delegated session uses `Sites.FullControl.All` on
+Microsoft Graph PowerShell, never on the schedule-guard app, and they revoke
+that consent afterwards with a command written in the runbook (Q8).
 
 ## 14. Challenge list
 
@@ -560,16 +572,15 @@ afterwards (Q8).
   update item list only `Sites.*.All` [L1][L4][L5]. Selected-scope support
   rests on the general statement in the overview [L2]. Resolved by the M9
   spike and its decision table. No Graph adapter work starts before it.
-- **C2 [blocker for Phase 3]** List subscriptions list `Sites.Read.All`
-  [L8]. Phase 3 is dropped or spiked separately (Q9).
-- **C3 [stale/no oracle]** "Openable in Project" has no oracle without MS
-  Project desktop. Until Q1 is answered, P7 (structural round-trip) is the
-  oracle.
-- **C4 [required, deferred]** The domain needs an ontology and glossary: more
-  than 3 entities, a conflict status machine, and an authz model. They don't
-  exist yet. This run may create only PLAN.md, so §3–4 are the draft and M0
-  writes them into `.claude/skills/domain/`. The same applies to `CLAUDE.md`
-  and `specs/001-*`.
+- **C2 [resolved: Phase 3 dropped]** List subscriptions list `Sites.Read.All`
+  [L8]. Phase 3 is dropped (Q9).
+- **C3 [no oracle, accepted]** "Openable in Project" has no oracle without MS
+  Project desktop, which the repo owner doesn't have (Q1). P7 (structural
+  round-trip) is the oracle.
+- **C4 [resolved in M0]** The domain needs an ontology and glossary: more
+  than 3 entities, a conflict status machine, and an authz model. M0 writes
+  them into `.claude/skills/domain/` from §3–4, together with `CLAUDE.md`
+  and `specs/001-offline-core/`.
 - **C5 [scoped out]** Real Project files with resource assignments carry
   per-assignment actuals and remaining work. Task-level writes can diverge
   from them. The Phase 1 fixture has no assignments. Supporting assignments
@@ -579,45 +590,47 @@ afterwards (Q8).
 - **C7 [skip]** Full MSPDI XSD validation needs an SDK download. We validate
   the subset we read.
 
-## 15. Open questions for Mark
+## 15. Decisions
 
-Defaults are what the plan does if you say nothing.
+The repo owner approved the plan "with your picks" on 2026-10-23; the answers
+were recorded on 2026-10-29. Each question is followed by its answer.
 
-1. **MS Project desktop:** do you have it? If so, a real export and an
-   "opens in Project" check join M7. Default: generated fixture only, and
-   "openable" stays unverified.
-2. **Daily sync time (CT):** default 06:00 America/Chicago.
-3. **Notes:** append dated entries (default) or replace the task's notes?
-4. **Summary tasks:** reject progress on summary tasks as `summary_task`
-   (default), or allow it?
-5. **Stale-version conflicts:** dismiss-only, and the field resubmits against
-   the current version (default)? Or should an admin be able to re-apply
-   against the current version?
-6. **Validation:** default checks are range/type plus finish ≥ start. Should
-   100 % require an actual finish? Should actual dates in the future be
-   rejected? Default: neither is enforced.
-7. **Re-baseline:** append a new baseline number and keep history (default),
-   or replace?
-8. **Grant session:** OK to consent `Sites.FullControl.All` (delegated) on
-   Graph PowerShell or Graph Explorer for the one-time list grant, then
-   revoke? Which tool?
-9. **Phase 3:** drop it, or keep it as a separate spike given the
-   `Sites.Read.All` listing [L8]?
-10. **Workflows trigger auth:** "anyone" with the URL as a secret (default),
-    or tenant-only, which needs a bearer token?
-11. **Progress Updates edit rights:** keep SharePoint's default and rely on G8
-    (default), or try a custom add-only permission level (**UNVERIFIED**)?
-12. **Spike fallback:** if list-level access fails, may the service use
-    `Sites.Selected` (write) on the demo site only?
-13. **Installs:** M0 needs `uv` on this PC and `uv sync` from PyPI. Approve
-    for M0 onwards? Is `uv` already installed?
-14. **Re-import:** Phase 1 imports into an empty project only. Do you want
-    `import --replace-plan` later? It would bump all task versions and never
-    touch baselines.
-15. **CI:** add GitHub Actions running `uv run pytest` on the public repo?
-    Default: no.
-16. **Phase 2 demo of a forbidden field:** add a "Proposed Finish" column to
-    Progress Updates so the demo shows `field_not_allowed`? Default: yes.
+1. **MS Project desktop?** No. Generated fixture only; "opens in Project"
+   stays **UNVERIFIED**.
+2. **Daily sync time (CT)?** 06:00 America/Chicago.
+3. **Notes: append or replace?** Append dated entries. Replace would be an
+   erase path.
+4. **Summary tasks?** Reject progress on them as `summary_task`. Project rolls
+   summaries up.
+5. **Stale-version conflicts?** Dismiss only; the field resubmits against the
+   current version. Sync stays the one write path to prove.
+6. **Validation?** Range/type, finish ≥ start, **and** 100 % needs an actual
+   finish, **and** no actual dates later than today (injectable clock).
+   Changes G5 and G6 (§5).
+7. **Re-baseline: append or replace?** Append a new numbered baseline and keep
+   history.
+8. **Grant session?** One-time grant from Graph PowerShell
+   (`Connect-MgGraph -Scopes Sites.FullControl.All`, delegated), revoked
+   afterwards; the revoke command goes in the runbook. Changes §13 and M8.
+9. **Phase 3?** Dropped from this project; mentioned under "next" in the
+   field-log post. Changes §10 and C2.
+10. **Workflows trigger auth?** "Anyone"; the URL is a secret in `.env`. Worst
+    case if it leaks: a fake alert in the demo channel.
+11. **Progress Updates edit rights?** SharePoint's default rights plus G8.
+12. **Spike fallback?** Yes: `Sites.Selected` (write) on the demo site only,
+    if list-level access fails, and only after the spike results have been
+    shown. Changes the §9.3 decision table.
+13. **Installs?** Approved: M0 may run `uv lock` and `uv sync` from PyPI for
+    the named deps only. Later runs sync offline from the lock; new deps are
+    asked for. `uv` 0.11.13 and `/usr/bin/python3.12` (3.12.3) are installed.
+14. **Re-import?** Phase 1 imports into an empty project only. No
+    `--replace-plan` for v1.0.
+15. **CI?** Yes: GitHub Actions running `uv run pytest -q`, added in M6 (not
+    M0). The CI config gets a max-effort review. Changes M6.
+16. **"Proposed Finish" demo column?** Yes, so the demo shows
+    `field_not_allowed`. Changes §9.1.
+17. **Owner's name in this public plan?** No: role names only (the tenant
+    admin, the scheduler, the repo owner).
 
 ## 16. Field-log post outline (written in M15)
 
