@@ -62,11 +62,29 @@ Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 ## Conflict status
 - `open` → `dismissed` (by a reviewer, with a note). No other transition.
 - Never `open` → applied. To change the schedule, the scheduler edits it in
-  MS Project and re-imports it.
+  MS Project; in v1.0 the changed schedule goes into a fresh project
+  database. Re-import into a non-empty project is out of scope (Q14).
 
 Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
 `stale_version`, `invalid_value`, `inconsistent_actuals`, `summary_task`,
 `edited_after_submit` (Phase 2).
+
+## Roles (authz model)
+- **Tenant admin** (Phase 2 only): consents the app permission, grants the
+  list roles, creates the Team, lists, Workflows flow and List rule, and
+  sets user rights on the lists. Has no CLI role.
+- **Scheduler**: owns the master schedule in MS Project. Runs `import`,
+  `baseline lock` and `rebaseline --confirm --reason`.
+- **Reviewer**: reviews conflicts. Runs `conflicts list` and
+  `conflicts dismiss <id> --note`; dismiss is the only review action.
+- **Repo owner**: approves the plan, new dependencies and live tenant calls,
+  and receives alerts.
+- Sync (`sync now|daily`, `rerun`) is run by the timer or any operator; it
+  never needs a role, because it can only apply progress fields.
+- Phase 1 is a local CLI with no authentication: anyone with shell access to
+  the host and the DB file acts as admin and can run every command. The
+  roles above are conventions, not enforced checks. The DB triggers still
+  protect the master schedule and baselines whoever runs a command.
 
 ## Constraints
 - Sync never writes the master schedule or any baseline; DB triggers

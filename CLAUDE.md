@@ -44,6 +44,9 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
    parsed defensively.
 8. Least privilege: Phase 2 gets write on two named lists only; never
    `Sites.Read.All`, `Sites.ReadWrite.All` or `Sites.FullControl.All`.
+   Single exception (Q12): `Sites.Selected` with write on the demo site
+   only, if the M9 spike shows list-level access fails, and only after the
+   spike results are shown.
 
 ## Public repo rules
 - This repo is public. Never commit tenant, client, site or list ids,
@@ -51,7 +54,8 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 - Fixture and demo data are generated and fictional only.
 - Tenant settings and secrets live in a gitignored `.env`; key files live
   outside the repo. `*.db`, `*.pem`, `*.pfx`, `*.key` are gitignored.
-- Use role names in docs: the tenant admin, the scheduler, the repo owner.
+- Use role names in docs: the tenant admin, the scheduler, the reviewer, the
+  repo owner.
 
 ## Off-limits (repo-specific)
 - `.env` and any key or certificate file: never read or edit.

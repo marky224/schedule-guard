@@ -34,12 +34,16 @@ way. Each one has a milestone that checks it.
    transaction, so a key can never be applied twice.
 6. **Conflicts are never applied.** They wait for a person to review them.
    Review can only dismiss a conflict with a note. To change the schedule
-   itself, the scheduler edits it in MS Project and re-imports it.
+   itself, the scheduler edits it in MS Project; in v1.0 the changed
+   schedule goes into a fresh project database. Re-import into a
+   non-empty project is out of scope (Q14).
 7. **Untrusted input everywhere.** MSPDI files, update files, and list rows
    are all parsed defensively.
 8. **Least privilege.** Phase 2 gets write access to two named lists only.
    The service never holds `Sites.Read.All`, `Sites.ReadWrite.All` or
-   `Sites.FullControl.All`.
+   `Sites.FullControl.All`. Single exception (Q12): `Sites.Selected` with
+   write on the demo site only, if the M9 spike shows list-level access
+   fails, and only after the spike results are shown.
 
 ## 2. Architecture
 
@@ -74,12 +78,16 @@ Everything runs on one Linux PC. All network calls go out from it: Graph,
 the Entra token endpoint, and the Workflows trigger URL. Nothing listens for
 inbound traffic. The report binds to `127.0.0.1`.
 
-### Planned layout (created in later runs, not now)
+### Layout (`[M0]` = exists since M0; everything else comes in later runs)
 
 ```
-pyproject.toml                       uv-managed, Python 3.12
-src/schedule_guard/
-  cli.py                             argparse entry point: `schedule-guard ...`
+pyproject.toml, uv.lock              [M0] uv-managed, Python 3.12
+CLAUDE.md                            [M0] stack, commands, map, invariants
+.claude/skills/domain/               [M0] ontology, glossary
+specs/001-offline-core/              [M0] spec, plan, tasks for M1–M6
+src/schedule_guard/                  [M0]
+  __init__.py                        [M0] package version
+  cli.py                             [M0] argparse entry point: `schedule-guard ...` (`--version` only so far)
   mspdi/parse.py                     safe MSPDI reader (defusedxml)
   mspdi/export.py                    progress-only MSPDI writer (Phase 2)
   store/schema.sql, store/db.py      SQLite schema, read-only triggers
@@ -95,7 +103,7 @@ src/schedule_guard/
   demo.py                            loads fake data for screenshots
 scripts/make_fixture.py              deterministic fixture generator
 tests/fixtures/                      generated MSPDI + update files (fake data only)
-tests/                               unit, property (Hypothesis), report tests
+tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py` so far)
 deploy/systemd/                      user .service + .timer (Phase 2)
 docs/tenant-setup.md                 Phase 2 runbook for the tenant admin
 docs/spike-graph-selected.md         Phase 2 spike results
@@ -146,15 +154,18 @@ Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 ## 4. Data model (SQLite)
 
 ```
-project(id PK, name, source_sha256, source_xml BLOB, imported_at)
+project(id PK, name, source_sha256, source_xml BLOB, imported_at,
+        import_finished_at NULL)          -- set once, last step of import
     trigger: BEFORE UPDATE OF source_xml, source_sha256 -> RAISE(ABORT)
+    trigger: BEFORE UPDATE OF import_finished_at -> ABORT unless NULL -> value
 
 task(project_id, uid, name, wbs, outline_level, is_summary, is_milestone,
      planned_start, planned_finish, planned_duration, planned_work,
      plan_c14n BLOB,                         -- canonical bytes of planned elements
      PRIMARY KEY(project_id, uid))
-    trigger: BEFORE UPDATE / DELETE -> RAISE(ABORT) unless done by import
-             (import runs before any sync and inserts only)
+    trigger: BEFORE UPDATE / DELETE -> RAISE(ABORT) (import inserts only)
+    trigger: BEFORE INSERT -> RAISE(ABORT) when the project's
+             import_finished_at is set (no new tasks after import)
 
 baseline(project_id, number, locked_at NULL, locked_by, reason, created_at,
          PRIMARY KEY(project_id, number))
@@ -164,6 +175,8 @@ baseline_task(project_id, number, task_uid, start, finish, duration, work, cost,
               xml_c14n BLOB,                 -- C14N bytes of the <Baseline> subtree
               PRIMARY KEY(project_id, number, task_uid))
     trigger: BEFORE UPDATE / DELETE -> RAISE(ABORT)
+    trigger: BEFORE INSERT -> RAISE(ABORT) when that baseline's locked_at
+             is set (a locked baseline gets no new rows)
 
 task_progress(project_id, task_uid, version INTEGER NOT NULL,
               percent_complete, actual_start, actual_finish, remaining_work, notes,
@@ -506,7 +519,7 @@ run.
 | --- | --- | --- | --- |
 | M0 | Scaffold: `CLAUDE.md` (stack, commands, map), `pyproject.toml` (uv, py3.12) + `uv.lock`, package skeleton, one passing test, `.claude/skills/domain/` (ontology + glossary from §3–4), `specs/001-offline-core/{spec,plan,tasks}.md`, `.gitignore` additions (`*.db`, `*.pem`, `*.pfx`, `*.key`, `CLAUDE.local.md`, `.claude/settings.local.json`). Install approved (Q13). | S | `uv run pytest -q` is green. `git status` clean. Diff has no GUIDs, emails or private paths. |
 | M1 | Fixture generator + safe MSPDI parser. Malicious-XML tests. | M | Fixture determinism test, parser tests, XXE/billion-laughs rejected. |
-| M2 | SQLite schema + read-only triggers + `import`, `baseline lock`, `rebaseline --confirm`. | M | Trigger tests (direct UPDATE/DELETE on baseline/task raises). Import round-trip of C14N bytes. |
+| M2 | SQLite schema + read-only triggers + `import`, `baseline lock`, `rebaseline --confirm`. | M | Trigger tests (direct UPDATE/DELETE on baseline/task raises; INSERT into a locked baseline or into `task` after import raises). Import round-trip of C14N bytes. |
 | M3 | Guard engine (pure) with rules G0–G7 + unit tests + P1, P2, P4, P5 + teeth test. | M | Property tests pass. The broken applier makes P1/P2 fail. |
 | M4 | `SourceAdapter` + file source + `sync now`/`daily`, run records, lock file, `rerun`, `runs`/`conflicts` CLI + P3, P6 + state machine. | L | All properties are green. Crash-and-rerun test. |
 | M5 | Read-only FastAPI report + `demo`. Screenshots taken with the `run` skill or by the repo owner. | M | Report tests (405s, escaping, overdue with fixed today). `demo` serves. |
@@ -580,7 +593,9 @@ that consent afterwards with a command written in the runbook (Q8).
 - **C4 [resolved in M0]** The domain needs an ontology and glossary: more
   than 3 entities, a conflict status machine, and an authz model. M0 writes
   them into `.claude/skills/domain/` from §3–4, together with `CLAUDE.md`
-  and `specs/001-offline-core/`.
+  and `specs/001-offline-core/`. The authz model is the Roles section of
+  `ontology.md` (added 2026-10-29): in Phase 1 the CLI is local, so anyone
+  with shell access acts as admin.
 - **C5 [scoped out]** Real Project files with resource assignments carry
   per-assignment actuals and remaining work. Task-level writes can diverge
   from them. The Phase 1 fixture has no assignments. Supporting assignments

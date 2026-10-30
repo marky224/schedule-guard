@@ -17,3 +17,7 @@
 | rerun | retry, replay | A run that reprocesses another run's captured items |
 | Tasks list | task table | Phase 2 SharePoint list the service publishes |
 | task | Tasks list row | An MSPDI task, identified by UID |
+| tenant admin | IT, admin (alone), owner's name | Phase 2: grants permissions and sets up the Team, lists and flow |
+| scheduler | planner, PM | Owns the master schedule; runs import, baseline lock, rebaseline |
+| reviewer | approver, admin (alone) | Reviews conflicts; runs conflicts dismiss |
+| repo owner | owner's name | Approves plan, deps and live calls; receives alerts |
