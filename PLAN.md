@@ -127,8 +127,10 @@ CLI (Phase 1):
 
 Runtime deps: `fastapi`, `uvicorn`, `jinja2`, `defusedxml`. Phase 2 adds `msal`
 and `httpx`. Dev deps: `pytest`, `hypothesis`, `httpx` (for TestClient).
-M0 resolves and locks these from PyPI once (Q13). Later runs sync from
-`uv.lock`; any new dependency is asked for first.
+M0 resolves and locks these from PyPI once (Q13). The lock is resolved with
+`[tool.uv] exclude-newer = "2026-10-22T00:00:00Z"` in `pyproject.toml`, so
+no package uploaded after that cutoff is used (Q19). Later runs sync from
+`uv.lock`; any new dependency or a later cutoff is asked for first.
 
 ## 3. Domain terms (canonical copy: `.claude/skills/domain/`, from M0)
 
@@ -646,6 +648,10 @@ were recorded on 2026-10-29. Each question is followed by its answer.
     `field_not_allowed`. Changes §9.1.
 17. **Owner's name in this public plan?** No: role names only (the tenant
     admin, the scheduler, the repo owner).
+18. **Where does PLAN.md live?** (2026-10-29) It stays at the repo root.
+19. **Dependency cutoff?** (2026-10-29) Re-lock with `exclude-newer =
+    "2026-10-22T00:00:00Z"` in `pyproject.toml`; packages uploaded after
+    the cutoff are not used.
 
 ## 16. Field-log post outline (written in M15)
 

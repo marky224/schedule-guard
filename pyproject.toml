@@ -28,3 +28,6 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.uv]
+exclude-newer = "2026-10-22T00:00:00Z"

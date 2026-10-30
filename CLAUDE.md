@@ -7,7 +7,9 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 - Language / framework / DB / test runner: Python 3.12, FastAPI + Jinja2
   (read-only report), SQLite (stdlib `sqlite3`), defusedxml (MSPDI parsing),
   pytest + Hypothesis
-- Package manager: uv (`uv.lock` committed; build backend `uv_build`)
+- Package manager: uv (`uv.lock` committed; build backend `uv_build`;
+  `[tool.uv] exclude-newer` cutoff 2026-10-22 in `pyproject.toml`; moving the
+  cutoff is a dependency change, so ask first)
 - CLI: `schedule-guard` (argparse, `src/schedule_guard/cli.py`)
 
 ## Commands
