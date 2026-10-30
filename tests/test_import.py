@@ -1,5 +1,8 @@
 import dataclasses
 import hashlib
+import os
+import subprocess
+import sys
 import unicodedata
 from contextlib import closing
 from datetime import UTC, datetime
@@ -139,6 +142,39 @@ def test_cli_import_escapes_control_characters_in_the_name(tmp_path, monkeypatch
     assert not [ch for ch in out.removesuffix("\n") if unicodedata.category(ch) == "Cc"]
     with closing(open_db(db)) as conn:  # only the printed line is escaped
         assert conn.execute("SELECT name FROM project").fetchone() == ("Fake\r\u009b2Kok",)
+
+
+def test_cli_import_escapes_format_characters_in_the_name(tmp_path, monkeypatch, capsys):
+    # U+202E (right-to-left override) would reorder the rest of the line on a bidi terminal.
+    monkeypatch.setattr(cli, "_now", lambda: NOW)
+    crafted = tmp_path / "crafted.xml"
+    title = "<Title>Fake\u202e\u2028Clinic</Title>".encode()
+    crafted.write_bytes(FIXTURE.read_bytes().replace(b"<Title>Riverbend Clinic</Title>", title))
+    assert cli.main(["import", "--db", str(tmp_path / "project.db"), str(crafted)]) == 0
+    assert capsys.readouterr().out.startswith("imported Fake\\u202e\\u2028Clinic: 40 tasks")
+
+
+def test_cli_import_escapes_a_file_name_that_is_not_utf_8(tmp_path):
+    # With no Name or Title, import prints the file name. A non-UTF-8 byte in
+    # it reaches Python as a lone surrogate, which a strict UTF-8 stdout can't
+    # write: the import would commit and then end in a traceback.
+    data = FIXTURE.read_bytes()
+    for element in (b"<Name>riverbend-clinic.xml</Name>", b"<Title>Riverbend Clinic</Title>"):
+        assert data.count(element) == 1
+        data = data.replace(element, b"")
+    path = os.path.join(os.fsencode(tmp_path), b"crafted\x9b2K.xml")
+    with open(path, "wb") as f:
+        f.write(data)
+    result = subprocess.run(
+        [sys.executable, "-m", "schedule_guard.cli", "import", "--db", str(tmp_path / "project.db"), path],
+        capture_output=True,
+        env={**os.environ, "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"},
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr.decode(errors="replace")
+    assert b"Traceback" not in result.stderr
+    assert result.stdout.startswith(b"imported crafted\\udc9b2K.xml: 40 tasks, baselines 0 (unlocked)")
+    assert b"\x9b" not in result.stdout
 
 
 @pytest.mark.parametrize(

@@ -2,7 +2,6 @@
 
 import argparse
 import sys
-import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -64,9 +63,13 @@ def _now() -> datetime:
 
 
 def _printable(text: str) -> str:
-    """`text` with control characters (C0, DEL and C1) escaped, so a file can't drive the terminal."""
-    return "".join(ch.encode("unicode_escape").decode("ascii") if unicodedata.category(ch) == "Cc" else ch
-                   for ch in text)
+    """`text` with every character str.isprintable() rejects escaped the way !r does.
+
+    That covers C0, DEL and C1 controls, format characters such as U+202E,
+    line and paragraph separators, and the lone surrogates a non-UTF-8 file
+    name decodes to, so a file can't drive or reorder the terminal.
+    """
+    return "".join(ch if ch.isprintable() else repr(ch)[1:-1] for ch in text)
 
 
 def _import(args: argparse.Namespace) -> int:

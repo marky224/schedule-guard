@@ -525,7 +525,7 @@ BAD_TASKS = {
         '<Task><UID>1</UID><Baseline><Number>0</Number><y xmlns=""/></Baseline></Task>',
         "element 'y' is outside the MSPDI namespace",
     ),
-    # Every element and attribute in a Baseline is in the MSPDI namespace, so C14N sees no other.
+    # A Baseline holds only MSPDI-namespace elements, so C14N sees no other namespace.
     "baseline-foreign-child": (
         '<Task><UID>1</UID><Baseline><Number>0</Number><y xmlns="urn:x"/></Baseline></Task>',
         r"element '\{urn:x\}y' is outside the MSPDI namespace",
