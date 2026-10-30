@@ -14,7 +14,7 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "riverbend-clinic.xml"
 IMPORTED = datetime(2026, 10, 30, 12, 0, tzinfo=UTC)
 NOW = datetime(2026, 10, 31, 9, 30, tzinfo=UTC)
 STAMP = "2026-10-31T09:30:00+00:00"
-TABLES = ("project", "task", "baseline", "baseline_task")
+TABLES = ("project", "task", "task_progress", "baseline", "baseline_task")
 
 
 @pytest.fixture

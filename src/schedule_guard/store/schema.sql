@@ -1,4 +1,4 @@
--- schedule-guard SQLite schema, version 1 (PLAN.md section 4).
+-- schedule-guard SQLite schema, version 2 (PLAN.md section 4).
 --
 -- project, task, baseline and baseline_task hold the imported file, the
 -- master schedule and the baselines. On any connection that leaves triggers
@@ -23,6 +23,9 @@
 -- the four tables are WITHOUT ROWID with no unique index besides their
 -- primary key, leaving no other key to conflict on. Never add a UNIQUE
 -- constraint or a CREATE UNIQUE INDEX to them.
+--
+-- task_progress is not protected: it holds the progress fields and the
+-- task version, which import seeds and an applied update changes.
 
 CREATE TABLE project (
     id                 INTEGER NOT NULL PRIMARY KEY,
@@ -147,3 +150,18 @@ BEGIN SELECT RAISE(ABORT, 'baseline_task: rows are read-only'); END;
 
 CREATE TRIGGER baseline_task_no_delete BEFORE DELETE ON baseline_task
 BEGIN SELECT RAISE(ABORT, 'baseline_task: rows are never deleted'); END;
+
+-- One row per task. Import seeds it with the file's progress values at
+-- version 0; each applied update writes the progress fields and adds 1.
+CREATE TABLE task_progress (
+    project_id       INTEGER NOT NULL,
+    task_uid         INTEGER NOT NULL,
+    version          INTEGER NOT NULL,
+    percent_complete INTEGER,
+    actual_start     TEXT,                      -- MSPDI date-time, like 2026-07-16T08:00:00
+    actual_finish    TEXT,
+    remaining_work   TEXT,                      -- MSPDI duration, like PT96H0M0S
+    notes            TEXT,
+    last_update_id   INTEGER,                   -- the update applied last (M4); NULL as imported
+    PRIMARY KEY (project_id, task_uid)
+);

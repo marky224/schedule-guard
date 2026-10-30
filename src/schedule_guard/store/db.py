@@ -11,7 +11,9 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-SCHEMA_VERSION = 1
+# Version 1 (the M2 build) had no task_progress. Nothing was released, so
+# there is no upgrade from it: such a file is refused like any other version.
+SCHEMA_VERSION = 2
 SCHEMA = Path(__file__).with_name("schema.sql")
 
 

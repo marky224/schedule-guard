@@ -380,6 +380,31 @@ def test_open_db_refuses_another_schema_version(tmp_path):
         open_db(path)
 
 
+def test_open_db_refuses_a_version_1_database_from_before_task_progress(tmp_path):
+    path = tmp_path / "m2.db"
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute("CREATE TABLE project (id)")
+        conn.execute("PRAGMA user_version = 1")
+    with pytest.raises(StoreError, match=f"schema version 1; this schedule-guard uses {SCHEMA_VERSION}"):
+        open_db(path)
+
+
+def test_task_progress_has_one_writable_row_per_task(tmp_path):
+    path = tmp_path / "new.db"
+    with closing(open_db(path, create=True)) as conn:
+        columns = [(name, notnull, pk) for _, name, _, notnull, _, pk in conn.execute("PRAGMA table_info(task_progress)")]
+    assert columns == [
+        ("project_id", 1, 1), ("task_uid", 1, 2), ("version", 1, 0), ("percent_complete", 0, 0),
+        ("actual_start", 0, 0), ("actual_finish", 0, 0), ("remaining_work", 0, 0), ("notes", 0, 0),
+        ("last_update_id", 0, 0),
+    ]
+    # Not a protected table: an applied update writes it.
+    allowed(path, "INSERT INTO task_progress (project_id, task_uid, version) VALUES (1, 1, 0)")
+    allowed(path, "UPDATE task_progress SET version = 1, percent_complete = 50")
+    with closing(sqlite3.connect(path)) as conn:
+        assert conn.execute("SELECT version, percent_complete FROM task_progress").fetchall() == [(1, 50)]
+
+
 def test_transaction_rolls_back_when_the_block_raises(tmp_path):
     path = tmp_path / "store.db"
     with closing(open_db(path, create=True)) as conn:

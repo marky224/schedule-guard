@@ -40,7 +40,8 @@ or any baseline.
   references forbidden; over 20 MB or over 10,000 tasks rejected; root must
   be `Project` in namespace `http://schemas.microsoft.com/project`). It
   stores the raw bytes with their SHA-256, the master schedule per task
-  (with its planned elements as C14N bytes), and every `<Baseline>`
+  (with its planned elements as C14N bytes), each task's progress values
+  from the file at task version 0, and every `<Baseline>`
   subtree as C14N bytes, in one transaction that ends by setting the
   project's `import_finished_at`. After that, the schema refuses new task
   rows. It works only on an empty project (Q14); a second import is refused.

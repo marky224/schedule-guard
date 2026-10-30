@@ -4,7 +4,9 @@ The whole file is read and parsed (`read_source`) before anything is
 written, so the CLI does that before it creates the database file. Then the
 project (raw bytes and their SHA-256), the master schedule and every
 baseline go in one transaction that ends by setting
-`project.import_finished_at`; after that the schema refuses new tasks. A
+`project.import_finished_at`; after that the schema refuses new tasks.
+Each task's progress values from the file go into task_progress at version
+0, the version the first update is made against. A
 database holds one project, so a second import is refused (Q14): a changed
 schedule goes into a fresh database. Imported baselines stay unlocked until
 `baseline lock` (Q24).
@@ -72,6 +74,14 @@ def import_source(conn: sqlite3.Connection, source: Source, *, now: datetime) ->
             [
                 (PROJECT_ID, t.uid, t.name, t.wbs, t.outline_level, int(t.is_summary), int(t.is_milestone),
                  t.planned_start, t.planned_finish, t.planned_duration, t.planned_work, t.plan_c14n)
+                for t in project.tasks
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO task_progress (project_id, task_uid, version, percent_complete, actual_start, actual_finish,"
+            " remaining_work, notes) VALUES (?, ?, 0, ?, ?, ?, ?, ?)",
+            [
+                (PROJECT_ID, t.uid, t.percent_complete, t.actual_start, t.actual_finish, t.remaining_work, t.notes)
                 for t in project.tasks
             ],
         )

@@ -201,6 +201,8 @@ baseline_task(project_id, number, task_uid, start, finish, duration, work, cost,
 task_progress(project_id, task_uid, version INTEGER NOT NULL,
               percent_complete, actual_start, actual_finish, remaining_work, notes,
               last_update_id, PRIMARY KEY(project_id, task_uid))
+    import seeds one row per task with the file's progress values at
+    version 0; not protected (an applied update writes it)
 
 source_update(id PK, source, source_item_id, item_version, task_uid,
               made_against_version, fields_json, submitted_at, submitted_by,

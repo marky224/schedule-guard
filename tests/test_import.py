@@ -22,7 +22,7 @@ STAMP = "2026-10-30T12:00:00+00:00"
 PLANNED = {f"{{{NS}}}{tag}" for tag in (
     "Name", "WBS", "OutlineLevel", "Summary", "Milestone", "Start", "Finish", "Duration", "Work", "PredecessorLink"
 )}
-TABLES = ("project", "task", "baseline", "baseline_task")
+TABLES = ("project", "task", "task_progress", "baseline", "baseline_task")
 
 
 @pytest.fixture
@@ -78,6 +78,28 @@ def test_imported_c14n_bytes_round_trip(conn):
         assert ET.canonicalize(xml_data=xml.decode()).encode() == xml
         (original,) = originals[uid].iterfind(f"{{{NS}}}Baseline")
         assert shape(ET.fromstring(xml)) == shape(original)
+
+
+def test_import_seeds_each_tasks_progress_at_version_0(conn, tmp_path):
+    import_file(conn, FIXTURE, now=NOW)
+    rows = conn.execute("SELECT * FROM task_progress ORDER BY task_uid").fetchall()
+    assert rows == [
+        (1, t.uid, 0, t.percent_complete, t.actual_start, t.actual_finish, t.remaining_work, t.notes, None)
+        for t in sorted(parse_mspdi(FIXTURE.read_bytes()).tasks, key=lambda t: t.uid)
+    ]
+    # The fixture has no actuals or notes yet, so seed a file that has them.
+    started = tmp_path / "started.xml"
+    started.write_text(
+        f'<Project xmlns="{NS}"><Tasks><Task><UID>7</UID><PercentComplete>40</PercentComplete>'
+        "<ActualStart>2026-07-16T08:00:00</ActualStart><RemainingWork>PT96H0M0S</RemainingWork>"
+        "<Notes>Pump truck booked</Notes></Task><Task><UID>8</UID></Task></Tasks></Project>"
+    )
+    with closing(open_db(tmp_path / "started.db", create=True)) as other:
+        import_file(other, started, now=NOW)
+        assert other.execute("SELECT * FROM task_progress ORDER BY task_uid").fetchall() == [
+            (1, 7, 0, 40, "2026-07-16T08:00:00", None, "PT96H0M0S", "Pump truck booked", None),
+            (1, 8, 0, None, None, None, None, None, None),
+        ]
 
 
 def test_imported_baselines_stay_unlocked_until_baseline_lock(conn):
