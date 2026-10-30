@@ -116,10 +116,12 @@ or any baseline.
   new key, on any of the four tables (including deleting the `project` row
   that way and re-inserting it with a new hash and `import_finished_at`
   NULL), and `UPDATE OR REPLACE ... SET rowid = ...`: refused, because the
-  four tables are WITHOUT ROWID ("no such column: rowid").
-- A REPLACE through another unique key: the four tables carry no UNIQUE
-  constraint besides their primary key, so there is none to conflict on; a
-  schema check fails if one is added.
+  four tables are WITHOUT ROWID ("table <t> has no column named rowid" for
+  the INSERT, "no such column: rowid" for the UPDATE).
+- A REPLACE through another unique key: the four tables carry no unique
+  index of any kind besides their primary key (no UNIQUE constraint, no
+  `CREATE UNIQUE INDEX`, partial or on an expression), so there is none to
+  conflict on; the schema check fails if one is added.
 - Direct SQL INSERT of a `baseline_task` row unless its baseline exists
   with `locked_at` not set and its task exists: the trigger aborts.
 - Direct SQL INSERT of a `task` row unless its project exists with
@@ -143,11 +145,11 @@ or any baseline.
   key on all four tables (a locked baseline stays locked); `INSERT OR
   REPLACE` with an explicit rowid on all four tables (including the
   project delete and re-insert) and `UPDATE OR REPLACE ... SET rowid`; a
-  schema check that the four tables are WITHOUT ROWID and have no UNIQUE
-  constraint besides the primary key; INSERT into
-  `task` after `import_finished_at` or for a missing project; INSERT into
-  `baseline` for a missing project; INSERT into `baseline_task` for a
-  locked or missing baseline or a missing task. Imported C14N bytes
+  schema check that `PRAGMA table_list` shows `wr` = 1 for the four tables
+  and that every `PRAGMA index_list` row with `unique` = 1 has origin `pk`;
+  INSERT into `task` after `import_finished_at` or for a missing project;
+  INSERT into `baseline` for a missing project; INSERT into `baseline_task`
+  for a locked or missing baseline or a missing task. Imported C14N bytes
   round-trip; rebaseline refuses without `--confirm`/`--reason` and past
   number 10.
 - M3: unit tests for G0–G7, including the Q6 checks with a fixed clock;

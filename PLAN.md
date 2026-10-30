@@ -223,12 +223,17 @@ row. Two parts close it:
    existing key aborts.
 2. **No other unique key.** The four tables are WITHOUT ROWID, so there is
    no hidden rowid: `INSERT OR REPLACE ... (rowid, ...)` with an existing
-   row's rowid and a new key, or `UPDATE OR REPLACE ... SET rowid = ...`,
-   fails with "no such column: rowid". They carry no UNIQUE constraint
-   besides their primary key, because a second one would reopen the same
-   hole through that constraint. The two allowed updates (the import flag
-   and the baseline lock) keep the primary key, so `UPDATE OR REPLACE`
-   can't conflict either.
+   row's rowid and a new key fails with "table <t> has no column named
+   rowid", and `UPDATE OR REPLACE ... SET rowid = ...` fails with "no such
+   column: rowid". They carry no unique index of any kind besides their
+   primary key: no UNIQUE constraint and no `CREATE UNIQUE INDEX`, partial
+   or on an expression, because REPLACE deletes through a second unique key
+   the same way. The two allowed updates (the import flag and the baseline
+   lock) keep the primary key, so `UPDATE OR REPLACE` can't conflict
+   either. A schema check covers both: `PRAGMA table_list` shows `wr` = 1
+   for the four tables, and every `PRAGMA index_list` row with `unique` = 1
+   has origin `pk` (a UNIQUE constraint shows origin `u`, a
+   `CREATE UNIQUE INDEX` origin `c`).
 
 None of this depends on a pragma. It holds on any connection that leaves
 triggers enabled (the default). A connection can switch triggers off
@@ -555,7 +560,7 @@ run.
 | --- | --- | --- | --- |
 | M0 | Scaffold: `CLAUDE.md` (stack, commands, map), `pyproject.toml` (uv, py3.12) + `uv.lock`, package skeleton, one passing test, `.claude/skills/domain/` (ontology + glossary from §3–4), `specs/001-offline-core/{spec,plan,tasks}.md`, `.gitignore` additions (`*.db`, `*.pem`, `*.pfx`, `*.key`, `CLAUDE.local.md`, `.claude/settings.local.json`). Install approved (Q13). | S | `uv run pytest -q` is green. `git status` clean. Diff has no GUIDs, emails or private paths. |
 | M1 | Fixture generator + safe MSPDI parser. Malicious-XML tests. | M | Fixture determinism test, parser tests, XXE/billion-laughs rejected. |
-| M2 | SQLite schema + read-only triggers + `import`, `baseline lock`, `rebaseline --confirm`. | M | Trigger tests with the default `recursive_triggers = OFF`: direct UPDATE/DELETE on `project`, `task`, `baseline` and `baseline_task` rows raises (except the one-time `import_finished_at` set and the lock); INSERT OR REPLACE with an existing key raises on all four tables; INSERT OR REPLACE with an explicit rowid and UPDATE OR REPLACE SET rowid fail on all four (WITHOUT ROWID), and a schema check finds no UNIQUE constraint besides each primary key; INSERT into a locked or missing baseline, or into `task` after import or for a missing project, raises. Import round-trip of C14N bytes. |
+| M2 | SQLite schema + read-only triggers + `import`, `baseline lock`, `rebaseline --confirm`. | M | Trigger tests with the default `recursive_triggers = OFF`: direct UPDATE/DELETE on `project`, `task`, `baseline` and `baseline_task` rows raises (except the one-time `import_finished_at` set and the lock); INSERT OR REPLACE with an existing key raises on all four tables; INSERT OR REPLACE with an explicit rowid ("table <t> has no column named rowid") and UPDATE OR REPLACE SET rowid ("no such column: rowid") fail on all four (WITHOUT ROWID), and a schema check finds `wr` = 1 in `PRAGMA table_list` for the four tables and that every `PRAGMA index_list` row with `unique` = 1 has origin `pk`; INSERT into a locked or missing baseline, or into `task` after import or for a missing project, raises. Import round-trip of C14N bytes. |
 | M3 | Guard engine (pure) with rules G0–G7 + unit tests + P1, P2, P4, P5 + teeth test. | M | Property tests pass. The broken applier makes P1/P2 fail. |
 | M4 | `SourceAdapter` + file source + `sync now`/`daily`, run records, lock file, `rerun`, `runs`/`conflicts` CLI + P3, P6 + state machine. | L | All properties are green. Crash-and-rerun test. |
 | M5 | Read-only FastAPI report + `demo`. Screenshots taken with the `run` skill or by the repo owner. | M | Report tests (405s, escaping, overdue with fixed today). `demo` serves. |
