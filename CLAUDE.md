@@ -18,6 +18,8 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 - Dev: `uv run schedule-guard --help`
 - Test all: `uv run pytest -q`
 - Test one: `uv run pytest -q tests/test_smoke.py::test_cli_version_prints_package_version`
+- Regenerate the MSPDI fixture: `uv run python scripts/make_fixture.py`
+  (seeded; `tests/test_fixture.py` fails if the checked-in bytes differ)
 - Lint / types: none configured yet
 - Proof command for a change: `uv run pytest -q`
 - Use the system interpreter: `UV_PYTHON_DOWNLOADS=never`, `/usr/bin/python3.12`
@@ -25,7 +27,9 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 ## Map
 - src/schedule_guard/ — application code (`cli.py`; schemas added in M2 are
   the executable domain model)
-- tests/ — oracles (smoke test now; property tests from M3)
+- tests/ — oracles (smoke and fixture tests now; property tests from M3)
+- tests/fixtures/ — generated, fictional inputs (`riverbend-clinic.xml`)
+- scripts/ — `make_fixture.py`, the seeded fixture generator
 - specs/001-offline-core/ — spec.md, plan.md, tasks.md for M1–M6
 - .claude/skills/domain/ — ontology, glossary (present)
 - PLAN.md — architecture, guard rules, milestones, decisions (§15), sources
