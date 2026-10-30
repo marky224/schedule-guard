@@ -221,8 +221,12 @@ __marimo__/
 
 # schedule-guard: local data, credentials, private Claude files
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
 *.pem
 *.pfx
+*.p12
 *.key
 CLAUDE.local.md
 .claude/settings.local.json
