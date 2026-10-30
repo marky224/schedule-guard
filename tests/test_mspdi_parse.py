@@ -1,6 +1,7 @@
 import sys
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import pytest
@@ -15,6 +16,9 @@ from schedule_guard.mspdi.parse import (
     parse_mspdi,
     read_mspdi_bytes,
 )
+
+
+FIXTURE = Path(__file__).resolve().parent / "fixtures" / "riverbend-clinic.xml"
 
 
 def mspdi(tasks: str) -> bytes:
@@ -173,14 +177,15 @@ def test_rejects_bytes_over_the_size_limit_before_parsing():
 
 
 class ReadRecorder:
-    """A real file that records the size each read() asks for."""
+    """A real file that records, per read(), the size asked for and the bytes returned."""
 
-    def __init__(self, f, sizes: list):
-        self._f, self._sizes = f, sizes
+    def __init__(self, f, reads: list):
+        self._f, self._reads = f, reads
 
     def read(self, size=-1):
-        self._sizes.append(size)
-        return self._f.read(size)
+        chunk = self._f.read(size)
+        self._reads.append((size, len(chunk)))
+        return chunk
 
     def __enter__(self):
         return self
@@ -194,15 +199,23 @@ def test_reads_a_file_up_to_the_size_limit_and_no_further(tmp_path, monkeypatch)
     with open(at_limit, "wb") as f:
         f.truncate(MAX_FILE_BYTES)
     with open(over, "wb") as f:
-        f.truncate(MAX_FILE_BYTES + 1)
-    sizes: list = []
-    monkeypatch.setattr(parse_module, "open", lambda *a, **k: ReadRecorder(open(*a, **k), sizes), raising=False)
+        f.truncate(10 * MAX_FILE_BYTES)  # sparse, so it takes no disk space
+    opens: list[list] = []
+
+    def recording_open(*args, **kwargs):
+        opens.append(reads := [])
+        return ReadRecorder(open(*args, **kwargs), reads)
+
+    monkeypatch.setattr(parse_module, "open", recording_open, raising=False)
     assert len(read_mspdi_bytes(at_limit)) == MAX_FILE_BYTES
     with pytest.raises(MspdiError, match="20 MB"):
         read_mspdi_bytes(over)
-    # An unbounded read() would pull a huge file or an endless stream into memory.
-    assert sizes, "read_mspdi_bytes didn't read through open()"
-    assert all(isinstance(size, int) and 0 <= size <= MAX_FILE_BYTES + 1 for size in sizes), sizes
+    # An unbounded read(), or a loop of reads until EOF, would pull a huge file
+    # or an endless stream into memory, so count what each open returned.
+    assert opens and all(opens), "read_mspdi_bytes didn't read through open()"
+    for reads in opens:
+        assert all(isinstance(size, int) and 0 <= size <= MAX_FILE_BYTES + 1 for size, _ in reads), reads
+        assert sum(length for _, length in reads) <= MAX_FILE_BYTES + 1, reads
 
 
 def minimal_tasks(count: int) -> str:
@@ -224,6 +237,74 @@ def test_many_baselines_on_one_task_parse_in_linear_time():
     elapsed = time.perf_counter() - started
     assert len(task.baselines) == count
     assert elapsed < 5, f"{count} Baselines took {elapsed:.1f} s"
+
+
+MANY_NAMESPACES = {
+    # One Start with 16,000 attributes, each in its own namespace (0.6 MB).
+    "attributes": "<Start "
+    + " ".join(f'a{i}:x="1" xmlns:a{i}="urn:{i}"' for i in range(16_000))
+    + ">2026-06-01T08:00:00</Start>",
+    # 24,000 sibling elements, each in its own namespace (0.5 MB).
+    "elements": "".join(f'<y xmlns="urn:{i}"/>' for i in range(24_000)),
+}
+
+
+@pytest.mark.parametrize("body", MANY_NAMESPACES.values(), ids=MANY_NAMESPACES.keys())
+def test_many_namespaces_in_a_baseline_parse_in_linear_time(body):
+    # Far inside the size limit. The stdlib C14N writer searches its namespace
+    # list once per name, so passing these to it takes 10 to 13 s here.
+    data = mspdi(f"<Task><UID>1</UID><Baseline><Number>0</Number>{body}</Baseline></Task>")
+    started = time.perf_counter()
+    try:
+        parse_mspdi(data)
+    except MspdiError:
+        pass  # refusing the file is fine; this test checks how long it takes
+    elapsed = time.perf_counter() - started
+    assert elapsed < 5, f"took {elapsed:.1f} s"
+
+
+def declared_namespaces(xml_text: str) -> list[tuple[str, str]]:
+    parser = ET.XMLPullParser(events=("start-ns",))
+    parser.feed(xml_text)
+    return [ns for _, ns in parser.read_events()]
+
+
+@pytest.fixture
+def c14n_inputs(monkeypatch) -> list[str]:
+    """Every text the parser hands to ET.canonicalize."""
+    inputs: list[str] = []
+    canonicalize = ET.canonicalize
+
+    def spy(xml_data=None, **kwargs):
+        inputs.append(xml_data)
+        return canonicalize(xml_data=xml_data, **kwargs)
+
+    monkeypatch.setattr(ET, "canonicalize", spy)
+    return inputs
+
+
+def test_c14n_runs_once_per_baseline_of_the_fixture(c14n_inputs):
+    parse_mspdi(read_mspdi_bytes(FIXTURE))
+    assert len(c14n_inputs) == 40
+    assert all(declared_namespaces(text) == [("", NS)] for text in c14n_inputs)
+
+
+FEW_NAMESPACES = {
+    "attributes": '<Start xmlns:a="urn:a" xmlns:b="urn:b" a:x="1" b:x="1">2026-06-01T08:00:00</Start>',
+    "elements": '<y xmlns="urn:a"/><z xmlns="urn:b"/>',
+}
+
+
+@pytest.mark.parametrize("body", FEW_NAMESPACES.values(), ids=FEW_NAMESPACES.keys())
+def test_c14n_never_sees_a_namespace_besides_mspdi(body, c14n_inputs):
+    # A bound by counting, not timing: the C14N writer's search costs one step
+    # per declared namespace, and only the MSPDI one ever reaches it.
+    try:
+        parse_mspdi(mspdi(f"<Task><UID>1</UID><Baseline><Number>0</Number>{body}</Baseline></Task>"))
+    except MspdiError:
+        pass
+    namespaces = [declared_namespaces(text) for text in c14n_inputs]
+    assert all(ns == [("", NS)] for ns in namespaces), namespaces
 
 
 def test_rejects_more_tasks_than_the_limit():
@@ -252,6 +333,14 @@ def test_rejects_wrong_root_or_namespace(data):
         pytest.param(b'<?xml version="1.0" encoding="utf-7"?><Project/>', "encoding", id="multibyte-encoding"),
         pytest.param(
             f'<Project xmlns="{NS}"><Tasks/><Tasks/></Project>'.encode(), "more than one Tasks", id="two-tasks"
+        ),
+        # The namespace check reads "{NS}" as the start of a name; that holds
+        # only because expat refuses "}" inside a namespace URI.
+        pytest.param(
+            f'<Project xmlns="{NS}"><Tasks><Task><UID>1</UID><Baseline><Number>0</Number>'
+            f'<a:y xmlns:a="{NS}}}x"/></Baseline></Task></Tasks></Project>'.encode(),
+            "not well-formed",
+            id="namespace-uri-with-brace",
         ),
     ],
 )
@@ -298,7 +387,24 @@ BAD_TASKS = {
     ),
     "baseline-unnamespaced-child": (
         '<Task><UID>1</UID><Baseline><Number>0</Number><y xmlns=""/></Baseline></Task>',
-        "outside any namespace",
+        "element 'y' is outside the MSPDI namespace",
+    ),
+    # Every element and attribute in a Baseline is in the MSPDI namespace, so C14N sees no other.
+    "baseline-foreign-child": (
+        '<Task><UID>1</UID><Baseline><Number>0</Number><y xmlns="urn:x"/></Baseline></Task>',
+        r"element '\{urn:x\}y' is outside the MSPDI namespace",
+    ),
+    "baseline-foreign-attribute": (
+        '<Task><UID>1</UID><Baseline><Number xmlns:a="urn:x" a:b="1">0</Number></Baseline></Task>',
+        r"attribute '\{urn:x\}b' is outside the MSPDI namespace",
+    ),
+    "baseline-xml-space-attribute": (
+        '<Task><UID>1</UID><Baseline><Number xml:space="preserve">0</Number></Baseline></Task>',
+        r"attribute '\{http://www.w3.org/XML/1998/namespace\}space' is outside the MSPDI namespace",
+    ),
+    "baseline-unnamespaced-attribute": (
+        '<Task><UID>1</UID><Baseline b="1"><Number>0</Number></Baseline></Task>',
+        "attribute 'b' is outside the MSPDI namespace",
     ),
     "baseline-nested-too-deep": (
         f"<Task><UID>1</UID><Baseline><Number>0</Number>{DEEP}</Baseline></Task>",

@@ -10,7 +10,8 @@ Only the subset the guard needs is read and type-checked: per task the
 master-schedule fields, the progress fields, predecessor links and
 `<Baseline>` children. Everything else stays untouched in the raw bytes the
 importer stores. Each `<Baseline>` subtree is also returned as C14N 2.0
-bytes. Dates, durations and costs keep their MSPDI text once validated.
+bytes; every element and attribute in it must be in the MSPDI namespace.
+Dates, durations and costs keep their MSPDI text once validated.
 A field read here must hold plain text: one with child elements, or one
 repeated, has no single value and is refused rather than read in part.
 """
@@ -26,6 +27,7 @@ import defusedxml
 from defusedxml import ElementTree as SafeET
 
 NS = "http://schemas.microsoft.com/project"
+_NS_OPEN = f"{{{NS}}}"  # how ElementTree starts a name in NS; expat refuses a "}" inside a namespace URI
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_TASKS = 10_000
 
@@ -269,13 +271,23 @@ def _decimal(parent: ET.Element, tag: str, where: str) -> str | None:
 
 
 def _c14n(el: ET.Element, where: str) -> bytes:
-    """C14N 2.0 bytes of one subtree, with the MSPDI namespace as the default."""
+    """C14N 2.0 bytes of one subtree, with the MSPDI namespace as the default.
+
+    Every element and attribute in it must be in the MSPDI namespace. The
+    stdlib C14N writer searches its list of namespaces once per name, so a
+    subtree with thousands of namespaces takes quadratic time; with only the
+    MSPDI one, the work stays linear.
+    """
+    for node in el.iter():
+        if not node.tag.startswith(_NS_OPEN):
+            raise MspdiError(f"{where}: element {node.tag!r} is outside the MSPDI namespace")
+        for name in node.attrib:
+            if not name.startswith(_NS_OPEN):
+                raise MspdiError(f"{where}: attribute {name!r} is outside the MSPDI namespace")
     clone = copy.copy(el)
     clone.tail = None  # the whitespace after </Baseline> isn't part of it
     try:
         text = ET.tostring(clone, encoding="unicode", default_namespace=NS)
-    except ValueError as exc:
-        raise MspdiError(f"{where}: holds an element outside any namespace") from exc
     except RecursionError as exc:
         raise MspdiError(f"{where}: elements are nested too deeply") from exc
     # Re-parsing our own serialization of an already-parsed tree: it has no DTD.

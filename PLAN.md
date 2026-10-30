@@ -297,6 +297,12 @@ Rules that hold no matter which check fires:
   [L14], not on Learn, and this plan downloads nothing.
 - Baseline bytes = `xml.etree.ElementTree.canonicalize` (C14N 2.0, stdlib) of
   each `<Baseline>` subtree, stored per task.
+- Every element and attribute inside a `<Baseline>` must be in the MSPDI
+  namespace; anything else is refused before C14N. The stdlib C14N writer
+  searches its namespace list once per name, so a subtree with thousands of
+  namespaces would take quadratic time. That a real Project export never
+  puts another namespace there is **UNVERIFIED** (no real export, Q1);
+  checked in M7.
 - **Fixture**: `scripts/make_fixture.py` is seeded and deterministic. It writes
   `tests/fixtures/riverbend-clinic.xml`: a fictional ~40-task clinic build by
   "Example Builders Co." in phases Site work, Foundations, Structure, Envelope,

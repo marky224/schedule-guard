@@ -96,6 +96,9 @@ or any baseline.
 ## Edge cases / failures
 - Billion-laughs, XXE file read, external DTD, oversize file, wrong root or
   namespace: rejected with a clear error, no file read, nothing stored.
+- An element or attribute outside the MSPDI namespace inside a `<Baseline>`:
+  rejected before C14N, so parsing stays linear (UNVERIFIED against a real
+  Project export; checked in M7).
 - Update with allowed and forbidden fields together: whole update is a
   `field_not_allowed` conflict; no field is applied.
 - Two updates made against the same version in one run: the first applies,
