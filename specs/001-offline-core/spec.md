@@ -109,9 +109,17 @@ or any baseline.
   `import_finished_at` (so its id, raw source bytes and hash never change):
   the trigger aborts.
 - `INSERT OR REPLACE` into `project`, `task`, `baseline` or `baseline_task`
-  with an existing key: the BEFORE INSERT trigger aborts, so a locked
-  baseline stays locked. This holds with SQLite's default
+  with an existing primary key: the BEFORE INSERT trigger aborts, so a
+  locked baseline stays locked. This holds with SQLite's default
   `recursive_triggers = OFF`; no connection pragma is needed.
+- `INSERT OR REPLACE ... (rowid, ...)` with an existing row's rowid and a
+  new key, on any of the four tables (including deleting the `project` row
+  that way and re-inserting it with a new hash and `import_finished_at`
+  NULL), and `UPDATE OR REPLACE ... SET rowid = ...`: refused, because the
+  four tables are WITHOUT ROWID ("no such column: rowid").
+- A REPLACE through another unique key: the four tables carry no UNIQUE
+  constraint besides their primary key, so there is none to conflict on; a
+  schema check fails if one is added.
 - Direct SQL INSERT of a `baseline_task` row unless its baseline exists
   with `locked_at` not set and its task exists: the trigger aborts.
 - Direct SQL INSERT of a `task` row unless its project exists with
@@ -132,7 +140,11 @@ or any baseline.
   and `baseline` (except the one-time lock); DELETE of the `project` row,
   `UPDATE project SET id = ...`, any change to its raw bytes or hash, and a
   second set of `import_finished_at`; `INSERT OR REPLACE` with an existing
-  key on all four tables (a locked baseline stays locked); INSERT into
+  key on all four tables (a locked baseline stays locked); `INSERT OR
+  REPLACE` with an explicit rowid on all four tables (including the
+  project delete and re-insert) and `UPDATE OR REPLACE ... SET rowid`; a
+  schema check that the four tables are WITHOUT ROWID and have no UNIQUE
+  constraint besides the primary key; INSERT into
   `task` after `import_finished_at` or for a missing project; INSERT into
   `baseline` for a missing project; INSERT into `baseline_task` for a
   locked or missing baseline or a missing task. Imported C14N bytes

@@ -84,10 +84,11 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
 - Phase 1 is a local CLI with no authentication: anyone with shell access to
   the host and the DB file can run every command. The roles above are
   conventions, not enforced checks. Whoever runs a command, the DB triggers
-  refuse UPDATE, DELETE and `INSERT OR REPLACE` on the master schedule and
-  baselines from any SQLite connection, whatever its pragmas. They can't stop
-  someone who can write the DB file from dropping a trigger or replacing the
-  file.
+  and the WITHOUT ROWID tables refuse UPDATE, DELETE, `INSERT OR REPLACE`
+  and `UPDATE OR REPLACE` on the master schedule and baselines, on any
+  connection that leaves triggers enabled (the default). They can't stop
+  someone who can write the DB file from switching triggers off on their
+  connection, dropping a trigger or replacing the file.
 
 ## Constraints
 - Sync never writes the master schedule or any baseline; DB triggers

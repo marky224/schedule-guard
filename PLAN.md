@@ -158,35 +158,36 @@ Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 ```
 project(id PK, name, source_sha256, source_xml BLOB, imported_at,
         import_finished_at NULL)          -- set once, last step of import
+    WITHOUT ROWID (import assigns the id)
     trigger: BEFORE DELETE -> RAISE(ABORT)
     trigger: BEFORE UPDATE -> ABORT unless the only change is
              import_finished_at going from NULL to a value (the id, raw
              bytes, hash and every other column never change)
-    trigger: BEFORE INSERT -> ABORT when the id already exists
+    trigger: BEFORE INSERT -> ABORT when the primary key already exists
 
 task(project_id, uid, name, wbs, outline_level, is_summary, is_milestone,
      planned_start, planned_finish, planned_duration, planned_work,
      plan_c14n BLOB,                         -- canonical bytes of planned elements
-     PRIMARY KEY(project_id, uid))
+     PRIMARY KEY(project_id, uid)) WITHOUT ROWID
     trigger: BEFORE UPDATE / DELETE -> RAISE(ABORT) (import inserts only)
     trigger: BEFORE INSERT -> RAISE(ABORT) unless the project exists and
              its import_finished_at is NULL (no new tasks after import),
-             and when the key already exists
+             and when the primary key already exists
 
 baseline(project_id, number, locked_at NULL, locked_by, reason, created_at,
-         PRIMARY KEY(project_id, number))
+         PRIMARY KEY(project_id, number)) WITHOUT ROWID
     trigger: BEFORE DELETE -> ABORT; BEFORE UPDATE -> ABORT unless the only
              change is the one-time lock: locked_at (with locked_by) going
              from NULL to a value
-    trigger: BEFORE INSERT -> ABORT when the key already exists or the
-             project does not exist
+    trigger: BEFORE INSERT -> ABORT when the primary key already exists or
+             the project does not exist
 baseline_task(project_id, number, task_uid, start, finish, duration, work, cost,
               xml_c14n BLOB,                 -- C14N bytes of the <Baseline> subtree
-              PRIMARY KEY(project_id, number, task_uid))
+              PRIMARY KEY(project_id, number, task_uid)) WITHOUT ROWID
     trigger: BEFORE UPDATE / DELETE -> RAISE(ABORT)
     trigger: BEFORE INSERT -> RAISE(ABORT) unless that baseline exists with
              locked_at NULL and the task exists (a locked baseline gets no
-             new rows), and when the key already exists
+             new rows), and when the primary key already exists
 
 task_progress(project_id, task_uid, version INTEGER NOT NULL,
               percent_complete, actual_start, actual_finish, remaining_work, notes,
@@ -211,13 +212,30 @@ writeback(update_id PK, target, payload_json, attempts, done_at,
           etag_after)                         -- Phase 2 outbox
 ```
 
-Every BEFORE INSERT trigger above refuses a key that already exists. That
-is what stops `INSERT OR REPLACE`: with SQLite's default
-`recursive_triggers = OFF`, REPLACE deletes the old row without firing its
-DELETE trigger, and no UPDATE trigger fires, so a REPLACE could otherwise
-unlock a baseline or swap a protected row. The triggers don't depend on any
-connection pragma, so they hold on every connection, including a plain
-`sqlite3` shell. The M2 tests run with the default pragma.
+With SQLite's default `recursive_triggers = OFF`, a REPLACE deletes the row
+it conflicts with without firing that row's DELETE trigger, and no UPDATE
+trigger fires. So every unique key on `project`, `task`, `baseline` and
+`baseline_task` would be a way to unlock a baseline or delete a protected
+row. Two parts close it:
+
+1. **Existing-key triggers.** Every BEFORE INSERT trigger above refuses a
+   primary key that already exists, so `INSERT OR REPLACE` with an
+   existing key aborts.
+2. **No other unique key.** The four tables are WITHOUT ROWID, so there is
+   no hidden rowid: `INSERT OR REPLACE ... (rowid, ...)` with an existing
+   row's rowid and a new key, or `UPDATE OR REPLACE ... SET rowid = ...`,
+   fails with "no such column: rowid". They carry no UNIQUE constraint
+   besides their primary key, because a second one would reopen the same
+   hole through that constraint. The two allowed updates (the import flag
+   and the baseline lock) keep the primary key, so `UPDATE OR REPLACE`
+   can't conflict either.
+
+None of this depends on a pragma. It holds on any connection that leaves
+triggers enabled (the default). A connection can switch triggers off
+(`SQLITE_DBCONFIG_ENABLE_TRIGGER`, or `.dbconfig enable_trigger off` in the
+`sqlite3` shell); like dropping a trigger, that takes someone who can
+already write the DB file, which Phase 1 doesn't guard against (ontology
+Roles). The M2 tests run with the default settings.
 
 The DB file lives outside the repo, or in a gitignored path. It holds the
 deltaLink, which contains site and list ids.
@@ -537,7 +555,7 @@ run.
 | --- | --- | --- | --- |
 | M0 | Scaffold: `CLAUDE.md` (stack, commands, map), `pyproject.toml` (uv, py3.12) + `uv.lock`, package skeleton, one passing test, `.claude/skills/domain/` (ontology + glossary from §3–4), `specs/001-offline-core/{spec,plan,tasks}.md`, `.gitignore` additions (`*.db`, `*.pem`, `*.pfx`, `*.key`, `CLAUDE.local.md`, `.claude/settings.local.json`). Install approved (Q13). | S | `uv run pytest -q` is green. `git status` clean. Diff has no GUIDs, emails or private paths. |
 | M1 | Fixture generator + safe MSPDI parser. Malicious-XML tests. | M | Fixture determinism test, parser tests, XXE/billion-laughs rejected. |
-| M2 | SQLite schema + read-only triggers + `import`, `baseline lock`, `rebaseline --confirm`. | M | Trigger tests with the default `recursive_triggers = OFF`: direct UPDATE/DELETE on `project`, `task`, `baseline` and `baseline_task` rows raises (except the one-time `import_finished_at` set and the lock); INSERT OR REPLACE with an existing key raises on all four tables; INSERT into a locked or missing baseline, or into `task` after import or for a missing project, raises. Import round-trip of C14N bytes. |
+| M2 | SQLite schema + read-only triggers + `import`, `baseline lock`, `rebaseline --confirm`. | M | Trigger tests with the default `recursive_triggers = OFF`: direct UPDATE/DELETE on `project`, `task`, `baseline` and `baseline_task` rows raises (except the one-time `import_finished_at` set and the lock); INSERT OR REPLACE with an existing key raises on all four tables; INSERT OR REPLACE with an explicit rowid and UPDATE OR REPLACE SET rowid fail on all four (WITHOUT ROWID), and a schema check finds no UNIQUE constraint besides each primary key; INSERT into a locked or missing baseline, or into `task` after import or for a missing project, raises. Import round-trip of C14N bytes. |
 | M3 | Guard engine (pure) with rules G0–G7 + unit tests + P1, P2, P4, P5 + teeth test. | M | Property tests pass. The broken applier makes P1/P2 fail. |
 | M4 | `SourceAdapter` + file source + `sync now`/`daily`, run records, lock file, `rerun`, `runs`/`conflicts` CLI + P3, P6 + state machine. | L | All properties are green. Crash-and-rerun test. |
 | M5 | Read-only FastAPI report + `demo`. Screenshots taken with the `run` skill or by the repo owner. | M | Report tests (405s, escaping, overdue with fixed today). `demo` serves. |
