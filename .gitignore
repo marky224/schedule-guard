@@ -218,3 +218,11 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# schedule-guard: local data, credentials, private Claude files
+*.db
+*.pem
+*.pfx
+*.key
+CLAUDE.local.md
+.claude/settings.local.json
