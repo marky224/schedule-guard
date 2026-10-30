@@ -1,6 +1,6 @@
 # Spec: 001 offline core (PLAN.md milestones M1–M6)
 
-Status: approved 2026-10-29 (PLAN.md §15). Not started.
+Status: derived from the approved PLAN.md (approved 2026-10-23); not started.
 Source plan: [PLAN.md](../../PLAN.md) §1–8, §11. Terms: `.claude/skills/domain/`.
 
 ## Problem
@@ -39,26 +39,31 @@ or any baseline.
   over 20 MB or over 10,000 tasks rejected; root must be `Project` in
   namespace `http://schemas.microsoft.com/project`). It stores the raw bytes
   with their SHA-256, the master schedule per task, and every `<Baseline>`
-  subtree as C14N bytes. It works only on an empty project (Q14); a second
-  import is refused.
+  subtree as C14N bytes, in one transaction that ends by setting the
+  project's `import_finished_at`. After that, the schema refuses new task
+  rows. It works only on an empty project (Q14); a second import is refused.
+  In v1.0 a changed schedule goes into a fresh project database.
 - **US2 Baselines (M2).** `baseline lock [--number N]` locks an imported
   baseline. `rebaseline --confirm --reason "..."` appends the next baseline
   number from the current planned values; old baselines never change and
-  history is kept (Q7). Without `--confirm` or `--reason` it refuses. It
+  history is kept (Q7). A locked baseline refuses new rows as well as
+  updates and deletes. Without `--confirm` or `--reason` it refuses. It
   refuses past baseline number 10 (**UNVERIFIED**: MS Project's Baseline plus
   Baseline1–10, from memory; Learn's Baseline element page gives no range;
   checked in M7). Sync, rerun and report code never call it.
 - **US3 Guard (M3).** Each progress update gets exactly one outcome:
   `applied`, `conflict` or `duplicate`. Checks, first failure wins:
   - G0: key already decided → `duplicate`.
-  - G1 `malformed`: missing task UID or version, wrong types.
+  - G1 `malformed`: The payload is malformed: missing task id or version,
+    wrong types, unknown encoding.
   - G2 `unknown_task`.
   - G3 `field_not_allowed`: any field outside percent_complete,
     actual_start, actual_finish, remaining_work, notes.
   - G4 `stale_version`: made-against version ≠ current task version.
-  - G5 `invalid_value`: % complete outside 0–100, negative remaining work,
-    unparseable date, or an actual start or finish later than today (Q6).
-    "Today" comes from an injectable clock.
+  - G5 `invalid_value`: A value is out of range or the wrong type: %
+    complete outside 0–100, unparseable date, negative remaining work, or an
+    actual start/finish later than today (Q6; "today" is an injectable
+    clock).
   - G6 `inconsistent_actuals`, after merging with current values: actual
     finish before actual start, or % complete 100 without an actual finish
     (Q6).
@@ -100,8 +105,13 @@ or any baseline.
 - A conflict is never applied by `rerun` (its key returns `duplicate`).
 - Direct SQL UPDATE or DELETE on `task`, `baseline_task`, or the raw source
   bytes: the trigger aborts.
-- Dates in MSPDI are local without offset; "today" is the host's local date
-  (America/Chicago) unless the clock is injected.
+- Direct SQL INSERT of a `baseline_task` row for a baseline whose
+  `locked_at` is set: the trigger aborts.
+- Direct SQL INSERT of a `task` row after the project's
+  `import_finished_at` is set: the trigger aborts.
+- Dates in MSPDI are local without offset. At run time "today" is the host's
+  local date (America/Chicago). Every test injects the clock; no test reads
+  the host clock or time zone, so a UTC CI runner gives the same results.
 - `rebaseline` on a project already at baseline number 10: refused.
 - Task names or notes containing HTML: escaped in the report.
 
@@ -110,6 +120,8 @@ or any baseline.
 - M1: regenerating the fixture yields identical bytes; each malicious XML case
   is rejected.
 - M2: trigger tests raise on direct writes; imported C14N bytes round-trip;
+  INSERT into a locked baseline's `baseline_task` and INSERT into `task`
+  after `import_finished_at` both raise;
   rebaseline refuses without `--confirm`/`--reason` and past number 10.
 - M3: unit tests for G0–G7, including the Q6 checks with a fixed clock;
   Hypothesis P1 (baseline bytes and SHA-256 identical), P2 (master schedule
