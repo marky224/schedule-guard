@@ -75,7 +75,22 @@ or any baseline.
 
   Applied updates write only progress fields and bump the task version by 1.
   `notes` is appended as `[date, source, submitter] text` and never replaces
-  existing text (Q3).
+  existing text (Q3); the date is `submitted_at`'s date in America/Chicago,
+  and entries are separated by a line feed.
+
+  The guard (`guard.decide`) is pure: it takes the update, its task's
+  current state and the clock, and returns one outcome. Its caller says
+  whether the idempotency key already has an outcome (G0) and stores the
+  result. An update's payload is an object with integer `task_uid` and
+  `made_against_version`, a non-empty `fields` object, a `submitted_by`
+  name and a `submitted_at` date-time with a UTC offset; anything else,
+  including an item its source couldn't decode, is `malformed`. Values:
+  `percent_complete` an integer from 0 to 100; `actual_start` and
+  `actual_finish` MSPDI date-times (`2026-07-16T08:00:00`, local, no
+  offset); `remaining_work` hours from 0 to 1,000,000, stored as an MSPDI
+  duration (`PT12H30M0S`); `notes` text an MSPDI file can hold (no control
+  characters besides tab, LF and CR, no lone surrogates). Null is no value,
+  so an update can't clear a field.
 - **US4 Sync (M4).** `sync now` and `sync daily` read every item from the
   file source (JSON Lines) and process them in `(submitted_at,
   source_item_id)` order. Each item commits its outcome in its own
