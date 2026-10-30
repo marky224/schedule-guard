@@ -52,6 +52,14 @@ def test_lock_refuses_a_missing_baseline(conn):
     assert contents(conn) == before
 
 
+@pytest.mark.parametrize("number", [-1, 11, 99999999999999999999])
+def test_lock_refuses_a_number_outside_0_to_10(conn, number):
+    before = contents(conn)
+    with pytest.raises(BaselineRefused, match=f"there is no baseline {number}: numbers run from 0 to 10"):
+        lock_baseline(conn, number, now=NOW)
+    assert contents(conn) == before
+
+
 @pytest.mark.parametrize("command", [
     pytest.param(lambda conn: lock_baseline(conn, 0, now=NOW), id="lock"),
     pytest.param(lambda conn: rebaseline(conn, confirm=True, reason="r", now=NOW), id="rebaseline"),
@@ -153,6 +161,17 @@ def test_cli_baseline_lock_and_rebaseline(tmp_path, monkeypatch, capsys):
         assert conn.execute("SELECT number, locked_by FROM baseline ORDER BY number").fetchall() == [
             (0, "baseline lock"), (1, "rebaseline")
         ]
+
+
+def test_cli_baseline_lock_refuses_a_number_too_big_for_sqlite(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_now", lambda: NOW)
+    db = str(tmp_path / "project.db")
+    assert cli.main(["import", "--db", db, str(FIXTURE)]) == 0
+    capsys.readouterr()
+    assert cli.main(["baseline", "lock", "--db", db, "--number", "99999999999999999999"]) == 1
+    assert capsys.readouterr().err == (
+        "schedule-guard: error: there is no baseline 99999999999999999999: numbers run from 0 to 10\n"
+    )
 
 
 def test_cli_baseline_commands_refuse_a_missing_database(tmp_path, capsys):

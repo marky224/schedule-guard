@@ -1,5 +1,6 @@
 import dataclasses
 import hashlib
+import unicodedata
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
@@ -123,6 +124,38 @@ def test_cli_import(tmp_path, monkeypatch, capsys):
 def test_cli_import_reports_a_missing_file(tmp_path, capsys):
     assert cli.main(["import", "--db", str(tmp_path / "project.db"), str(tmp_path / "missing.xml")]) == 1
     assert "schedule-guard: error: [Errno 2] No such file or directory" in capsys.readouterr().err
+
+
+def test_cli_import_escapes_control_characters_in_the_name(tmp_path, monkeypatch, capsys):
+    # XML 1.0 allows a CR (as &#13;) and C1 controls such as U+009B in text.
+    monkeypatch.setattr(cli, "_now", lambda: NOW)
+    crafted = tmp_path / "crafted.xml"
+    title = "<Title>Fake&#13;\u009b2Kok</Title>".encode()
+    crafted.write_bytes(FIXTURE.read_bytes().replace(b"<Title>Riverbend Clinic</Title>", title))
+    db = tmp_path / "project.db"
+    assert cli.main(["import", "--db", str(db), str(crafted)]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("imported Fake\\r\\x9b2Kok: 40 tasks")
+    assert not [ch for ch in out.removesuffix("\n") if unicodedata.category(ch) == "Cc"]
+    with closing(open_db(db)) as conn:  # only the printed line is escaped
+        assert conn.execute("SELECT name FROM project").fetchone() == ("Fake\r\u009b2Kok",)
+
+
+@pytest.mark.parametrize(
+    ("name", "content", "message"),
+    [
+        pytest.param("missing.xml", None, "No such file or directory", id="missing-file"),
+        pytest.param("wrong-root.xml", b"<Project/>", "root element must be Project", id="refused-file"),
+    ],
+)
+def test_cli_import_of_a_refused_file_leaves_no_database_file(tmp_path, capsys, name, content, message):
+    source = tmp_path / name
+    if content is not None:
+        source.write_bytes(content)
+    db = tmp_path / "new.db"
+    assert cli.main(["import", "--db", str(db), str(source)]) == 1
+    assert message in capsys.readouterr().err
+    assert not db.exists()
 
 
 def test_cli_import_needs_a_database_path(capsys):

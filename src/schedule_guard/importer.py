@@ -1,6 +1,7 @@
 """`schedule-guard import`: store an MSPDI file in an empty database.
 
-The whole file is read and parsed before anything is written. Then the
+The whole file is read and parsed (`read_source`) before anything is
+written, so the CLI does that before it creates the database file. Then the
 project (raw bytes and their SHA-256), the master schedule and every
 baseline go in one transaction that ends by setting
 `project.import_finished_at`; after that the schema refuses new tasks. A
@@ -15,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from schedule_guard.mspdi.parse import parse_mspdi, read_mspdi_bytes
+from schedule_guard.mspdi.parse import MspdiProject, parse_mspdi, read_mspdi_bytes
 from schedule_guard.store.db import transaction
 
 PROJECT_ID = 1
@@ -33,10 +34,27 @@ class ImportResult:
     source_sha256: str
 
 
-def import_file(conn: sqlite3.Connection, path: str | Path, *, now: datetime) -> ImportResult:
-    """Store the MSPDI file at `path`; `now` stamps imported_at and the baselines' created_at."""
+@dataclass(frozen=True, slots=True)
+class Source:
+    """An MSPDI file, read and parsed, ready to store."""
+
+    data: bytes
+    project: MspdiProject
+
+
+def read_source(path: str | Path) -> Source:
     data = read_mspdi_bytes(path)
-    project = parse_mspdi(data)
+    return Source(data=data, project=parse_mspdi(data))
+
+
+def import_file(conn: sqlite3.Connection, path: str | Path, *, now: datetime) -> ImportResult:
+    """Read, parse and store the MSPDI file at `path`."""
+    return import_source(conn, read_source(path), now=now)
+
+
+def import_source(conn: sqlite3.Connection, source: Source, *, now: datetime) -> ImportResult:
+    """Store a parsed file; `now` stamps imported_at and the baselines' created_at."""
+    data, project = source.data, source.project
     name = project.title or project.name
     sha256 = hashlib.sha256(data).hexdigest()
     stamp = now.isoformat(timespec="seconds")

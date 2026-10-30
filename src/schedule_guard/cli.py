@@ -2,12 +2,13 @@
 
 import argparse
 import sys
+import unicodedata
 from datetime import UTC, datetime
 from pathlib import Path
 
 from schedule_guard import __version__
 from schedule_guard.baselines import BaselineRefused, lock_baseline, rebaseline
-from schedule_guard.importer import ImportRefused, import_file
+from schedule_guard.importer import ImportRefused, import_source, read_source
 from schedule_guard.mspdi.parse import MspdiError
 from schedule_guard.store.db import StoreError, open_db
 
@@ -62,15 +63,22 @@ def _now() -> datetime:
     return datetime.now(UTC)
 
 
+def _printable(text: str) -> str:
+    """`text` with control characters (C0, DEL and C1) escaped, so a file can't drive the terminal."""
+    return "".join(ch.encode("unicode_escape").decode("ascii") if unicodedata.category(ch) == "Cc" else ch
+                   for ch in text)
+
+
 def _import(args: argparse.Namespace) -> int:
+    source = read_source(args.file)  # a refused file leaves no database file behind
     conn = open_db(args.db, create=True)
     try:
-        result = import_file(conn, args.file, now=_now())
+        result = import_source(conn, source, now=_now())
     finally:
         conn.close()
     numbers = ", ".join(map(str, result.baselines)) or "none"
-    print(f"imported {result.name or args.file.name}: {result.tasks} tasks, baselines {numbers} (unlocked),"
-          f" sha256 {result.source_sha256}")
+    name = _printable(result.name or args.file.name)
+    print(f"imported {name}: {result.tasks} tasks, baselines {numbers} (unlocked), sha256 {result.source_sha256}")
     return 0
 
 

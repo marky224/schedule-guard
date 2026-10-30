@@ -97,7 +97,8 @@ or any baseline.
 
 ## Edge cases / failures
 - Billion-laughs, XXE file read, external DTD, oversize file, wrong root or
-  namespace: rejected with a clear error, no file read, nothing stored.
+  namespace: rejected with a clear error, no file read, nothing stored, and
+  no database file left at a new `--db` path (the file is parsed first).
 - Inside a `<Baseline>` or a master-schedule element (the bytes kept as
   C14N), an element outside the MSPDI namespace, any attribute, or an
   element more than 3 levels below the Baseline or PredecessorLink: rejected
@@ -152,6 +153,9 @@ or any baseline.
   zone. Every test injects the clock; no test reads the host clock or time
   zone, so a UTC CI runner gives the same results.
 - `rebaseline` on a project already at baseline number 10: refused.
+  `baseline lock --number` outside 0–10: refused with an error.
+- A project name with control characters: escaped when `import` prints
+  it; the stored name keeps them.
 - Task names or notes containing HTML: escaped in the report.
 
 ## Acceptance (testable)

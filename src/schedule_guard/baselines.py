@@ -19,6 +19,8 @@ class BaselineRefused(Exception):
 
 
 def lock_baseline(conn: sqlite3.Connection, number: int = 0, *, now: datetime) -> None:
+    if not 0 <= number <= MAX_BASELINE_NUMBER:  # also keeps a huge --number away from SQLite
+        raise BaselineRefused(f"there is no baseline {number}: numbers run from 0 to {MAX_BASELINE_NUMBER}")
     with transaction(conn):
         project_id = _imported_project(conn)
         row = conn.execute(
