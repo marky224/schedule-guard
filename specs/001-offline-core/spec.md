@@ -103,15 +103,22 @@ or any baseline.
 - Crash mid-run: items without an outcome are processed by `rerun`; the final
   state equals an uninterrupted run.
 - A conflict is never applied by `rerun` (its key returns `duplicate`).
-- Direct SQL UPDATE or DELETE on `task`, `baseline_task`, or the raw source
-  bytes: the trigger aborts.
-- Direct SQL INSERT of a `baseline_task` row for a baseline whose
-  `locked_at` is set: the trigger aborts.
-- Direct SQL INSERT of a `task` row after the project's
-  `import_finished_at` is set: the trigger aborts.
-- Dates in MSPDI are local without offset. At run time "today" is the host's
-  local date (America/Chicago). Every test injects the clock; no test reads
-  the host clock or time zone, so a UTC CI runner gives the same results.
+- Direct SQL UPDATE or DELETE on `task` or `baseline_task`, DELETE of the
+  `project` row, or any UPDATE of it other than the one-time set of
+  `import_finished_at` (so its id, raw source bytes and hash never change):
+  the trigger aborts.
+- `INSERT OR REPLACE` into `project`, `task`, `baseline` or `baseline_task`
+  with an existing key: the BEFORE INSERT trigger aborts, so a locked
+  baseline stays locked. This holds with SQLite's default
+  `recursive_triggers = OFF`; no connection pragma is needed.
+- Direct SQL INSERT of a `baseline_task` row unless its baseline exists
+  with `locked_at` not set and its task exists: the trigger aborts.
+- Direct SQL INSERT of a `task` row unless its project exists with
+  `import_finished_at` not set: the trigger aborts.
+- Dates in MSPDI are local without offset. At run time "today" is the
+  current date in America/Chicago (zoneinfo), whatever the host's time
+  zone. Every test injects the clock; no test reads the host clock or time
+  zone, so a UTC CI runner gives the same results.
 - `rebaseline` on a project already at baseline number 10: refused.
 - Task names or notes containing HTML: escaped in the report.
 
@@ -119,10 +126,17 @@ or any baseline.
 - `uv run pytest -q` is green after each milestone.
 - M1: regenerating the fixture yields identical bytes; each malicious XML case
   is rejected.
-- M2: trigger tests raise on direct writes; imported C14N bytes round-trip;
-  INSERT into a locked baseline's `baseline_task` and INSERT into `task`
-  after `import_finished_at` both raise;
-  rebaseline refuses without `--confirm`/`--reason` and past number 10.
+- M2: trigger tests raise on direct writes, run with SQLite's default
+  `recursive_triggers = OFF`: UPDATE or DELETE on `task`, `baseline_task`
+  and `baseline` (except the one-time lock); DELETE of the `project` row,
+  `UPDATE project SET id = ...`, any change to its raw bytes or hash, and a
+  second set of `import_finished_at`; `INSERT OR REPLACE` with an existing
+  key on all four tables (a locked baseline stays locked); INSERT into
+  `task` after `import_finished_at` or for a missing project; INSERT into
+  `baseline` for a missing project; INSERT into `baseline_task` for a
+  locked or missing baseline or a missing task. Imported C14N bytes
+  round-trip; rebaseline refuses without `--confirm`/`--reason` and past
+  number 10.
 - M3: unit tests for G0–G7, including the Q6 checks with a fixed clock;
   Hypothesis P1 (baseline bytes and SHA-256 identical), P2 (master schedule
   bytes identical), P4 (all or nothing), P5 (stale never applies) pass; with

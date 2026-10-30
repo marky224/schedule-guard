@@ -82,9 +82,12 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
 - Sync (`sync now|daily`, `rerun`) is run by the timer or any operator; it
   never needs a role, because it can only apply progress fields.
 - Phase 1 is a local CLI with no authentication: anyone with shell access to
-  the host and the DB file acts as admin and can run every command. The
-  roles above are conventions, not enforced checks. The DB triggers still
-  protect the master schedule and baselines whoever runs a command.
+  the host and the DB file can run every command. The roles above are
+  conventions, not enforced checks. Whoever runs a command, the DB triggers
+  refuse UPDATE, DELETE and `INSERT OR REPLACE` on the master schedule and
+  baselines from any SQLite connection, whatever its pragmas. They can't stop
+  someone who can write the DB file from dropping a trigger or replacing the
+  file.
 
 ## Constraints
 - Sync never writes the master schedule or any baseline; DB triggers

@@ -13,11 +13,11 @@ Format: `- [ ] T000 [P?] [USn] Description (path)`
 - [ ] T013 [P] [US1] Fixture determinism test (`tests/test_fixture.py`)
 - [ ] T014 [P] [US1] Parser tests: fields read, billion laughs, XXE, external DTD, oversize, wrong root (`tests/test_mspdi_parse.py`)
 ### M2: store, import, baselines
-- [ ] T020 [US1] Schema with read-only triggers on `project` raw bytes, `task`, `baseline`, `baseline_task` (`src/schedule_guard/store/schema.sql`)
+- [ ] T020 [US1] Schema with read-only triggers on `project`, `task`, `baseline`, `baseline_task`, including BEFORE INSERT triggers that refuse an existing key (`INSERT OR REPLACE`) or a missing or closed parent (`src/schedule_guard/store/schema.sql`)
 - [ ] T021 [US1] DB open/migrate helpers (`src/schedule_guard/store/db.py`)
 - [ ] T022 [US1] `import` into an empty project only; refuse a second import (Q14) (`src/schedule_guard/importer.py`, `src/schedule_guard/cli.py`)
-- [ ] T023 [US2] `baseline lock` and `rebaseline --confirm --reason`, append-only (Q7), refuse past number 10 (UNVERIFIED, checked in M7) (`src/schedule_guard/baselines.py`, `src/schedule_guard/cli.py`)
-- [ ] T024 [P] [US1] Trigger tests (`tests/test_store_triggers.py`)
+- [ ] T023 [US2] `baseline lock` and `rebaseline --confirm --reason`, append-only (Q7), refuse past number 10 (UNVERIFIED, checked in M7); rebaseline inserts the new baseline's `baseline_task` rows before it sets `locked_at`, since the INSERT trigger refuses rows for a locked baseline (`src/schedule_guard/baselines.py`, `src/schedule_guard/cli.py`)
+- [ ] T024 [P] [US1] Trigger tests, including `INSERT OR REPLACE`, project DELETE and id change, and orphan inserts, with the default `recursive_triggers = OFF` (`tests/test_store_triggers.py`)
 - [ ] T025 [P] [US1] Import round-trip tests (`tests/test_import.py`)
 - [ ] T026 [P] [US2] Baseline command tests (`tests/test_baselines.py`)
 ### M3: guard

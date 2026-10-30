@@ -1,7 +1,7 @@
 import shutil
 import subprocess
 import sys
-from pathlib import Path
+import sysconfig
 
 from schedule_guard import __version__
 
@@ -18,8 +18,9 @@ def test_cli_version_prints_package_version():
 
 
 def test_installed_console_script_prints_package_version():
-    bin_dir = Path(sys.executable).parent
-    script = shutil.which("schedule-guard", path=str(bin_dir)) or shutil.which("schedule-guard")
+    # Look only in this environment's scripts directory, so another
+    # schedule-guard on PATH can't stand in for the one this venv installed.
+    script = shutil.which("schedule-guard", path=sysconfig.get_path("scripts"))
     assert script, "schedule-guard console script is not installed"
     result = subprocess.run(
         [script, "--version"],

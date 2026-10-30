@@ -43,7 +43,7 @@ way. Each one has a milestone that checks it.
    The service never holds `Sites.Read.All`, `Sites.ReadWrite.All` or
    `Sites.FullControl.All`. Single exception (Q12): `Sites.Selected` with
    write on the demo site only, if the M9 spike shows list-level access
-   fails, and only after the spike results are shown.
+   fails, and only after the spike results are shown to the repo owner.
 
 ## 2. Architecture
 
@@ -158,27 +158,35 @@ Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 ```
 project(id PK, name, source_sha256, source_xml BLOB, imported_at,
         import_finished_at NULL)          -- set once, last step of import
-    trigger: BEFORE UPDATE OF source_xml, source_sha256 -> RAISE(ABORT)
-    trigger: BEFORE UPDATE OF import_finished_at -> ABORT unless NULL -> value
+    trigger: BEFORE DELETE -> RAISE(ABORT)
+    trigger: BEFORE UPDATE -> ABORT unless the only change is
+             import_finished_at going from NULL to a value (the id, raw
+             bytes, hash and every other column never change)
+    trigger: BEFORE INSERT -> ABORT when the id already exists
 
 task(project_id, uid, name, wbs, outline_level, is_summary, is_milestone,
      planned_start, planned_finish, planned_duration, planned_work,
      plan_c14n BLOB,                         -- canonical bytes of planned elements
      PRIMARY KEY(project_id, uid))
     trigger: BEFORE UPDATE / DELETE -> RAISE(ABORT) (import inserts only)
-    trigger: BEFORE INSERT -> RAISE(ABORT) when the project's
-             import_finished_at is set (no new tasks after import)
+    trigger: BEFORE INSERT -> RAISE(ABORT) unless the project exists and
+             its import_finished_at is NULL (no new tasks after import),
+             and when the key already exists
 
 baseline(project_id, number, locked_at NULL, locked_by, reason, created_at,
          PRIMARY KEY(project_id, number))
-    trigger: BEFORE DELETE -> ABORT; BEFORE UPDATE -> ABORT except the
-             one-time NULL -> value change of locked_at
+    trigger: BEFORE DELETE -> ABORT; BEFORE UPDATE -> ABORT unless the only
+             change is the one-time lock: locked_at (with locked_by) going
+             from NULL to a value
+    trigger: BEFORE INSERT -> ABORT when the key already exists or the
+             project does not exist
 baseline_task(project_id, number, task_uid, start, finish, duration, work, cost,
               xml_c14n BLOB,                 -- C14N bytes of the <Baseline> subtree
               PRIMARY KEY(project_id, number, task_uid))
     trigger: BEFORE UPDATE / DELETE -> RAISE(ABORT)
-    trigger: BEFORE INSERT -> RAISE(ABORT) when that baseline's locked_at
-             is set (a locked baseline gets no new rows)
+    trigger: BEFORE INSERT -> RAISE(ABORT) unless that baseline exists with
+             locked_at NULL and the task exists (a locked baseline gets no
+             new rows), and when the key already exists
 
 task_progress(project_id, task_uid, version INTEGER NOT NULL,
               percent_complete, actual_start, actual_finish, remaining_work, notes,
@@ -202,6 +210,14 @@ source_cursor(source PK, cursor)             -- Phase 2: deltaLink
 writeback(update_id PK, target, payload_json, attempts, done_at,
           etag_after)                         -- Phase 2 outbox
 ```
+
+Every BEFORE INSERT trigger above refuses a key that already exists. That
+is what stops `INSERT OR REPLACE`: with SQLite's default
+`recursive_triggers = OFF`, REPLACE deletes the old row without firing its
+DELETE trigger, and no UPDATE trigger fires, so a REPLACE could otherwise
+unlock a baseline or swap a protected row. The triggers don't depend on any
+connection pragma, so they hold on every connection, including a plain
+`sqlite3` shell. The M2 tests run with the default pragma.
 
 The DB file lives outside the repo, or in a gitignored path. It holds the
 deltaLink, which contains site and list ids.
@@ -521,7 +537,7 @@ run.
 | --- | --- | --- | --- |
 | M0 | Scaffold: `CLAUDE.md` (stack, commands, map), `pyproject.toml` (uv, py3.12) + `uv.lock`, package skeleton, one passing test, `.claude/skills/domain/` (ontology + glossary from §3–4), `specs/001-offline-core/{spec,plan,tasks}.md`, `.gitignore` additions (`*.db`, `*.pem`, `*.pfx`, `*.key`, `CLAUDE.local.md`, `.claude/settings.local.json`). Install approved (Q13). | S | `uv run pytest -q` is green. `git status` clean. Diff has no GUIDs, emails or private paths. |
 | M1 | Fixture generator + safe MSPDI parser. Malicious-XML tests. | M | Fixture determinism test, parser tests, XXE/billion-laughs rejected. |
-| M2 | SQLite schema + read-only triggers + `import`, `baseline lock`, `rebaseline --confirm`. | M | Trigger tests (direct UPDATE/DELETE on baseline/task raises; INSERT into a locked baseline or into `task` after import raises). Import round-trip of C14N bytes. |
+| M2 | SQLite schema + read-only triggers + `import`, `baseline lock`, `rebaseline --confirm`. | M | Trigger tests with the default `recursive_triggers = OFF`: direct UPDATE/DELETE on `project`, `task`, `baseline` and `baseline_task` rows raises (except the one-time `import_finished_at` set and the lock); INSERT OR REPLACE with an existing key raises on all four tables; INSERT into a locked or missing baseline, or into `task` after import or for a missing project, raises. Import round-trip of C14N bytes. |
 | M3 | Guard engine (pure) with rules G0–G7 + unit tests + P1, P2, P4, P5 + teeth test. | M | Property tests pass. The broken applier makes P1/P2 fail. |
 | M4 | `SourceAdapter` + file source + `sync now`/`daily`, run records, lock file, `rerun`, `runs`/`conflicts` CLI + P3, P6 + state machine. | L | All properties are green. Crash-and-rerun test. |
 | M5 | Read-only FastAPI report + `demo`. Screenshots taken with the `run` skill or by the repo owner. | M | Report tests (405s, escaping, overdue with fixed today). `demo` serves. |
@@ -597,7 +613,7 @@ that consent afterwards with a command written in the runbook (Q8).
   them into `.claude/skills/domain/` from §3–4, together with `CLAUDE.md`
   and `specs/001-offline-core/`. The authz model is the Roles section of
   `ontology.md` (added 2026-10-29): in Phase 1 the CLI is local, so anyone
-  with shell access acts as admin.
+  with shell access can run every command.
 - **C5 [scoped out]** Real Project files with resource assignments carry
   per-assignment actuals and remaining work. Task-level writes can diverge
   from them. The Phase 1 fixture has no assignments. Supporting assignments

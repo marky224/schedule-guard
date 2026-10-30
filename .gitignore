@@ -228,5 +228,8 @@ __marimo__/
 *.pfx
 *.p12
 *.key
+*.cer
+*.crt
+*.der
 CLAUDE.local.md
 .claude/settings.local.json

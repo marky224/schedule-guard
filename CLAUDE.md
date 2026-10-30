@@ -48,7 +48,7 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
    `Sites.Read.All`, `Sites.ReadWrite.All` or `Sites.FullControl.All`.
    Single exception (Q12): `Sites.Selected` with write on the demo site
    only, if the M9 spike shows list-level access fails, and only after the
-   spike results are shown.
+   spike results are shown to the repo owner.
 
 ## Public repo rules
 - This repo is public. Never commit tenant, client, site or list ids,
@@ -56,7 +56,8 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 - Fixture and demo data are generated and fictional only.
 - Tenant settings and secrets live in a gitignored `.env`; key files live
   outside the repo. `*.db` (and its `-wal`, `-shm`, `-journal` files),
-  `*.pem`, `*.pfx`, `*.p12`, `*.key` are gitignored.
+  `*.pem`, `*.pfx`, `*.p12`, `*.key`, `*.cer`, `*.crt`, `*.der` are
+  gitignored.
 - Use role names in docs: the tenant admin, the scheduler, the reviewer, the
   repo owner.
 
