@@ -112,6 +112,61 @@ def test_baseline_bytes_are_c14n_of_the_subtree_whatever_the_prefix():
         assert ET.canonicalize(xml_data=baseline.xml_c14n.decode()).encode() == expected
 
 
+def test_plan_bytes_are_c14n_of_the_master_schedule_elements():
+    task, bare = parse_mspdi(mspdi(TASK)).tasks
+    assert task.plan_c14n == (
+        f'<Task xmlns="{NS}"><Name>Pour slab &amp; cure</Name><WBS>2.4</WBS><OutlineLevel>2</OutlineLevel>'
+        "<Start>2026-07-16T08:00:00</Start><Finish>2026-07-22T17:00:00</Finish>"
+        "<Duration>PT40H0M0S</Duration><Work>PT160H0M0S</Work><Milestone>0</Milestone><Summary>0</Summary>"
+        "<PredecessorLink><PredecessorUID>11</PredecessorUID><Type>1</Type><LinkLag>4800</LinkLag></PredecessorLink>"
+        "<PredecessorLink><PredecessorUID>7</PredecessorUID><Type>3</Type></PredecessorLink></Task>"
+    ).encode()
+    assert bare.plan_c14n == f'<Task xmlns="{NS}"></Task>'.encode()
+    prefixed = (
+        f'<p:Project xmlns:p="{NS}"><p:Tasks><p:Task><p:UID>1</p:UID><p:Name>a</p:Name>\n'
+        "<p:PercentComplete>5</p:PercentComplete><p:Finish >2026-07-22T17:00:00</p:Finish>"
+        "</p:Task></p:Tasks></p:Project>"
+    ).encode()
+    (task,) = parse_mspdi(prefixed).tasks
+    assert task.plan_c14n == f'<Task xmlns="{NS}"><Name>a</Name><Finish>2026-07-22T17:00:00</Finish></Task>'.encode()
+
+
+PLAN_BASE = (
+    "<Task><UID>1</UID><Name>Frame walls</Name><Finish>2026-07-22T17:00:00</Finish>"
+    "<PercentComplete>10</PercentComplete><Notes>n</Notes>"
+    "<Baseline><Number>0</Number><Finish>2026-07-20T17:00:00</Finish></Baseline></Task>"
+)
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "planned"),
+    [
+        pytest.param("<PercentComplete>10<", "<PercentComplete>90<", False, id="percent-complete"),
+        pytest.param("<Notes>n<", "<Notes>other<", False, id="notes"),
+        pytest.param("<Number>0</Number><Finish>2026-07-20", "<Number>0</Number><Finish>2026-07-27", False,
+                     id="baseline-finish"),
+        pytest.param("</Notes>", "</Notes><ActualStart>2026-07-01T08:00:00</ActualStart>", False, id="actual-start"),
+        pytest.param("<Finish>2026-07-22", "<Finish>2026-07-29", True, id="finish"),
+        pytest.param("<Name>Frame walls<", "<Name>Frame wall<", True, id="name"),
+        pytest.param("</Notes>", "</Notes><PredecessorLink><PredecessorUID>2</PredecessorUID></PredecessorLink>", True,
+                     id="predecessor"),
+    ],
+)
+def test_plan_bytes_change_with_master_schedule_fields_only(old, new, planned):
+    assert PLAN_BASE.count(old) == 1
+    (before,) = parse_mspdi(mspdi(PLAN_BASE)).tasks
+    (after,) = parse_mspdi(mspdi(PLAN_BASE.replace(old, new))).tasks
+    assert (before.plan_c14n != after.plan_c14n) is planned
+
+
+def test_accepts_other_namespaces_outside_the_bytes_it_canonicalizes():
+    # Only Baselines and the master-schedule elements go through C14N; the
+    # rest of a task is kept as it is in the stored raw bytes.
+    data = mspdi('<Task><UID>1</UID><a:Extra xmlns:a="urn:x" a:b="1"/><Name>n</Name></Task>')
+    (task,) = parse_mspdi(data).tasks
+    assert task.plan_c14n == f'<Task xmlns="{NS}"><Name>n</Name></Task>'.encode()
+
+
 BILLION_LAUGHS = b"""<?xml version="1.0"?>
 <!DOCTYPE Project [
   <!ENTITY lol "lol">
@@ -239,21 +294,37 @@ def test_many_baselines_on_one_task_parse_in_linear_time():
     assert elapsed < 5, f"{count} Baselines took {elapsed:.1f} s"
 
 
+def namespaced_attributes(count: int) -> str:
+    return " ".join(f'a{i}:x="1" xmlns:a{i}="urn:{i}"' for i in range(count))
+
+
+def namespaced_elements(count: int) -> str:
+    return "".join(f'<y xmlns="urn:{i}"/>' for i in range(count))
+
+
+def in_baseline(body: str) -> str:
+    return f"<Task><UID>1</UID><Baseline><Number>0</Number>{body}</Baseline></Task>"
+
+
+def in_predecessor_link(body: str) -> str:
+    return f"<Task><UID>1</UID><PredecessorLink><PredecessorUID>2</PredecessorUID>{body}</PredecessorLink></Task>"
+
+
+# Each about 0.5 MB, far inside the size limit: 16,000 attributes on one
+# Start, or 24,000 sibling elements, each in its own namespace.
 MANY_NAMESPACES = {
-    # One Start with 16,000 attributes, each in its own namespace (0.6 MB).
-    "attributes": "<Start "
-    + " ".join(f'a{i}:x="1" xmlns:a{i}="urn:{i}"' for i in range(16_000))
-    + ">2026-06-01T08:00:00</Start>",
-    # 24,000 sibling elements, each in its own namespace (0.5 MB).
-    "elements": "".join(f'<y xmlns="urn:{i}"/>' for i in range(24_000)),
+    "baseline-attributes": in_baseline(f"<Start {namespaced_attributes(16_000)}>2026-06-01T08:00:00</Start>"),
+    "baseline-elements": in_baseline(namespaced_elements(24_000)),
+    "plan-attributes": f"<Task><UID>1</UID><Start {namespaced_attributes(16_000)}>2026-06-01T08:00:00</Start></Task>",
+    "plan-elements": in_predecessor_link(namespaced_elements(24_000)),
 }
 
 
-@pytest.mark.parametrize("body", MANY_NAMESPACES.values(), ids=MANY_NAMESPACES.keys())
-def test_many_namespaces_in_a_baseline_parse_in_linear_time(body):
-    # Far inside the size limit. The stdlib C14N writer searches its namespace
-    # list once per name, so passing these to it takes 10 to 13 s here.
-    data = mspdi(f"<Task><UID>1</UID><Baseline><Number>0</Number>{body}</Baseline></Task>")
+@pytest.mark.parametrize("tasks", MANY_NAMESPACES.values(), ids=MANY_NAMESPACES.keys())
+def test_many_namespaces_parse_in_linear_time(tasks):
+    # The stdlib C14N writer searches its namespace list once per name, so
+    # passing one of these to it takes 10 to 13 s here.
+    data = mspdi(tasks)
     started = time.perf_counter()
     try:
         parse_mspdi(data)
@@ -283,24 +354,26 @@ def c14n_inputs(monkeypatch) -> list[str]:
     return inputs
 
 
-def test_c14n_runs_once_per_baseline_of_the_fixture(c14n_inputs):
+def test_c14n_of_the_fixture_sees_only_the_mspdi_namespace(c14n_inputs):
     parse_mspdi(read_mspdi_bytes(FIXTURE))
-    assert len(c14n_inputs) == 40
+    assert len(c14n_inputs) == 80  # each task's Baseline 0 and its planned elements
     assert all(declared_namespaces(text) == [("", NS)] for text in c14n_inputs)
 
 
 FEW_NAMESPACES = {
-    "attributes": '<Start xmlns:a="urn:a" xmlns:b="urn:b" a:x="1" b:x="1">2026-06-01T08:00:00</Start>',
-    "elements": '<y xmlns="urn:a"/><z xmlns="urn:b"/>',
+    "baseline-attributes": in_baseline(f"<Start {namespaced_attributes(2)}>2026-06-01T08:00:00</Start>"),
+    "baseline-elements": in_baseline(namespaced_elements(2)),
+    "plan-attributes": f"<Task><UID>1</UID><Name {namespaced_attributes(2)}>n</Name></Task>",
+    "plan-elements": in_predecessor_link(namespaced_elements(2)),
 }
 
 
-@pytest.mark.parametrize("body", FEW_NAMESPACES.values(), ids=FEW_NAMESPACES.keys())
-def test_c14n_never_sees_a_namespace_besides_mspdi(body, c14n_inputs):
+@pytest.mark.parametrize("tasks", FEW_NAMESPACES.values(), ids=FEW_NAMESPACES.keys())
+def test_c14n_never_sees_a_namespace_besides_mspdi(tasks, c14n_inputs):
     # A bound by counting, not timing: the C14N writer's search costs one step
     # per declared namespace, and only the MSPDI one ever reaches it.
     try:
-        parse_mspdi(mspdi(f"<Task><UID>1</UID><Baseline><Number>0</Number>{body}</Baseline></Task>"))
+        parse_mspdi(mspdi(tasks))
     except MspdiError:
         pass
     namespaces = [declared_namespaces(text) for text in c14n_inputs]
@@ -405,6 +478,20 @@ BAD_TASKS = {
     "baseline-unnamespaced-attribute": (
         '<Task><UID>1</UID><Baseline b="1"><Number>0</Number></Baseline></Task>',
         "attribute 'b' is outside the MSPDI namespace",
+    ),
+    # The same holds for the master-schedule elements kept as plan_c14n.
+    "name-foreign-attribute": (
+        '<Task><UID>1</UID><Name xmlns:a="urn:x" a:b="1">n</Name></Task>',
+        r"task UID 1 planned elements: attribute '\{urn:x\}b' is outside the MSPDI namespace",
+    ),
+    "start-unnamespaced-attribute": (
+        '<Task><UID>1</UID><Start b="1">2026-06-01T08:00:00</Start></Task>',
+        "task UID 1 planned elements: attribute 'b' is outside the MSPDI namespace",
+    ),
+    "link-foreign-child": (
+        '<Task><UID>1</UID><PredecessorLink><PredecessorUID>2</PredecessorUID><y xmlns="urn:x"/>'
+        "</PredecessorLink></Task>",
+        r"task UID 1 planned elements: element '\{urn:x\}y' is outside the MSPDI namespace",
     ),
     "baseline-nested-too-deep": (
         f"<Task><UID>1</UID><Baseline><Number>0</Number>{DEEP}</Baseline></Task>",

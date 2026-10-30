@@ -9,9 +9,10 @@ rejected, and the root must be `Project` in the MSPDI namespace.
 Only the subset the guard needs is read and type-checked: per task the
 master-schedule fields, the progress fields, predecessor links and
 `<Baseline>` children. Everything else stays untouched in the raw bytes the
-importer stores. Each `<Baseline>` subtree is also returned as C14N 2.0
-bytes; every element and attribute in it must be in the MSPDI namespace.
-Dates, durations and costs keep their MSPDI text once validated.
+importer stores. Each `<Baseline>` subtree, and the task's master-schedule
+elements together, are also returned as C14N 2.0 bytes; every element and
+attribute in them must be in the MSPDI namespace. Dates, durations and costs
+keep their MSPDI text once validated.
 A field read here must hold plain text: one with child elements, or one
 repeated, has no single value and is refused rather than read in part.
 """
@@ -30,6 +31,10 @@ NS = "http://schemas.microsoft.com/project"
 _NS_OPEN = f"{{{NS}}}"  # how ElementTree starts a name in NS; expat refuses a "}" inside a namespace URI
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_TASKS = 10_000
+# The master schedule's elements; task.plan_c14n holds them.
+_PLANNED = frozenset(_NS_OPEN + tag for tag in (
+    "Name", "WBS", "OutlineLevel", "Summary", "Milestone", "Start", "Finish", "Duration", "Work", "PredecessorLink",
+))
 
 _INT = re.compile(r"-?[0-9]{1,18}")
 _DECIMAL = re.compile(r"-?[0-9]{1,18}(?:\.[0-9]{1,6})?")
@@ -80,6 +85,7 @@ class MspdiTask:
     notes: str | None
     predecessors: tuple[PredecessorLink, ...]
     baselines: tuple[MspdiBaseline, ...]
+    plan_c14n: bytes  # C14N 2.0 of the master-schedule elements, in file order, under one <Task>
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,6 +205,7 @@ def _task(el: ET.Element, index: int) -> MspdiTask:
         notes=_text(el, "Notes", where),
         predecessors=tuple(predecessors),
         baselines=tuple(baselines),
+        plan_c14n=_plan_c14n(el, where),
     )
 
 
@@ -268,6 +275,17 @@ def _duration(parent: ET.Element, tag: str, where: str) -> str | None:
 
 def _decimal(parent: ET.Element, tag: str, where: str) -> str | None:
     return _value(parent, tag, where, _DECIMAL, "a decimal number")
+
+
+def _plan_c14n(task: ET.Element, where: str) -> bytes:
+    """C14N 2.0 bytes of the task's master-schedule elements, in file order, under one Task."""
+    plan = ET.Element(_q("Task"))
+    for child in task:
+        if child.tag in _PLANNED:
+            part = copy.copy(child)
+            part.tail = None  # the whitespace between the task's children isn't part of the plan
+            plan.append(part)
+    return _c14n(plan, f"{where} planned elements")
 
 
 def _c14n(el: ET.Element, where: str) -> bytes:
