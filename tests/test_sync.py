@@ -230,6 +230,17 @@ def test_a_rerun_after_a_complete_run_gives_only_duplicates(fixture_db):
     assert state(fixture_db) == before
 
 
+def test_a_rerun_of_a_run_that_captured_nothing_is_refused(fixture_db, tmp_path):
+    failed = sync(fixture_db, FileSource(tmp_path / "missing.jsonl"), clock=CLOCK)  # failed before capturing
+    empty = sync(fixture_db, write(tmp_path), clock=CLOCK)  # read an empty file
+    assert (failed.status, failed.seen, empty.status, empty.seen) == ("failed", 0, "ok", 0)
+    for run in (failed, empty):
+        with pytest.raises(SyncRefused, match=f"run {run.run_id} captured nothing, so there is nothing to rerun"):
+            rerun(fixture_db, run.run_id, clock=CLOCK)
+    with closing(open_db(fixture_db)) as conn:
+        assert conn.execute("SELECT count(*) FROM sync_run").fetchone() == (2,)  # no rerun was recorded
+
+
 def test_a_source_that_cant_be_read_fails_the_run_and_captures_nothing(fixture_db, tmp_path):
     result = sync(fixture_db, FileSource(tmp_path / "missing.jsonl"), clock=CLOCK)
     assert (result.status, result.seen) == ("failed", 0)
@@ -331,6 +342,15 @@ def test_cli_sync_needs_a_file_source(fixture_db, capsys, spec):
 def test_cli_rerun_of_an_unknown_run_is_refused(fixture_db, capsys):
     assert cli.main(["rerun", "no-such-run", "--db", str(fixture_db)]) == 1
     assert "there is no run 'no-such-run'" in capsys.readouterr().err
+
+
+def test_cli_rerun_of_a_run_that_captured_nothing_is_refused(fixture_db, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cli, "_now", CLOCK)
+    db = str(fixture_db)
+    assert cli.main(["sync", "now", "--db", db, "--source", f"file:{tmp_path / 'missing.jsonl'}"]) == 1
+    run_id = capsys.readouterr().out.split()[1]
+    assert cli.main(["rerun", run_id, "--db", db]) == 1
+    assert capsys.readouterr() == ("", f"schedule-guard: error: run {run_id} captured nothing, so there is nothing to rerun\n")
 
 
 def test_cli_runs_list_with_no_runs(fixture_db, capsys):

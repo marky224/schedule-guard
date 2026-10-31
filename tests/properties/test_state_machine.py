@@ -1,14 +1,15 @@
 """A state machine that interleaves submit, sync, rerun, dismiss and baseline lock (PLAN.md section 8).
 
 P1, P2, P4 and P5 are checked after every step, and P3 after every sync: a
-second sync of the same file right after it decides nothing new. A baseline
-lock is the one step that may change a baseline row, and only its lock
-columns, never the bytes.
+second sync of the same file right after it decides nothing new. A rerun of
+a run that captured nothing is refused. A baseline lock is the one step
+that may change a baseline row, and only its lock columns, never the bytes.
 """
 
 from contextlib import closing
 from datetime import UTC, datetime
 
+import pytest
 from harness import (
     CLOCK, assert_all_or_nothing, assert_stale_never_applied, assert_unchanged, baselines, items, master_schedule,
     progress_rows, write_batch,
@@ -21,7 +22,7 @@ from schedule_guard.baselines import lock_baseline
 from schedule_guard.review import dismiss, list_conflicts
 from schedule_guard.sources.file import FileSource
 from schedule_guard.store.db import open_db
-from schedule_guard.sync import rerun, sync
+from schedule_guard.sync import SyncRefused, rerun, sync
 
 LATER = datetime(2026, 10, 30, 21, 0, tzinfo=UTC)
 
@@ -34,7 +35,7 @@ class SyncMachine(RuleBasedStateMachine):
         self.db = type(self).make_db()
         self.updates = self.db.with_name("updates.jsonl")
         self.updates.touch()
-        self.runs: list[str] = []
+        self.runs: list[tuple[str, int]] = []  # each run's id and how many lines it saw
         with closing(open_db(self.db)) as conn:
             self.baselines, self.plan, self.imported = baselines(conn), master_schedule(conn), progress_rows(conn)
 
@@ -52,14 +53,19 @@ class SyncMachine(RuleBasedStateMachine):
         assert result.status == "ok", result.error
         again = sync(self.db, FileSource(self.updates), clock=CLOCK)  # P3
         assert (again.status, again.applied, again.conflicts, again.duplicates) == ("ok", 0, 0, again.seen)
-        self.runs += [result.run_id, again.run_id]
+        self.runs += [(result.run_id, result.seen), (again.run_id, again.seen)]
 
     @precondition(lambda self: self.runs)
     @rule(data=st.data())
     def rerun_a_run(self, data):
-        result = rerun(self.db, data.draw(st.sampled_from(self.runs)), clock=CLOCK)
+        run_id, seen = data.draw(st.sampled_from(self.runs))
+        if not seen:  # the update file was still empty
+            with pytest.raises(SyncRefused, match="captured nothing"):
+                rerun(self.db, run_id, clock=CLOCK)
+            return
+        result = rerun(self.db, run_id, clock=CLOCK)
         assert (result.status, result.applied, result.conflicts) == ("ok", 0, 0)
-        self.runs.append(result.run_id)
+        self.runs.append((result.run_id, result.seen))
 
     @precondition(lambda self: self.open_conflicts())
     @rule(data=st.data())

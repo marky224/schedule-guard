@@ -42,7 +42,7 @@ _EARLIEST = datetime.min.replace(tzinfo=UTC)  # where an item without a usable s
 
 
 class SyncRefused(Exception):
-    """The run didn't start: another run holds the lock, there is no project, or no such run to rerun."""
+    """The run didn't start: another run holds the lock, there is no project, or nothing to rerun."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,11 +75,14 @@ def sync(db_path: str | Path, source: SourceAdapter, *, trigger: str = "now", cl
 
 
 def rerun(db_path: str | Path, run_id: str, *, clock: Clock = system_clock) -> RunResult:
-    """Process again the items run `run_id` captured, as a new run."""
+    """Process again the items run `run_id` captured, as a new run; refused if it captured none."""
     with closing(open_db(db_path)) as conn:
         row = conn.execute("SELECT source FROM sync_run WHERE id = ?", (run_id,)).fetchone()
+        captured = conn.execute("SELECT 1 FROM run_item WHERE run_id = ? LIMIT 1", (run_id,)).fetchone()
     if row is None:
         raise SyncRefused(f"there is no run {run_id!r}")
+    if captured is None:  # it failed before capturing, or its source gave nothing
+        raise SyncRefused(f"run {run_id} captured nothing, so there is nothing to rerun")
 
     def capture(conn: sqlite3.Connection, new_id: str) -> None:
         with transaction(conn):
