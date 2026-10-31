@@ -9,9 +9,13 @@ from schedule_guard import __version__
 from schedule_guard.baselines import BaselineRefused, lock_baseline, rebaseline
 from schedule_guard.importer import ImportRefused, import_source, read_source
 from schedule_guard.mspdi.parse import MspdiError
+from schedule_guard.review import ReviewRefused, dismiss, list_conflicts
+from schedule_guard.sources.file import FileSource
 from schedule_guard.store.db import StoreError, open_db
+from schedule_guard.sync import RunResult, SyncRefused, list_runs, rerun, sync
 
-REFUSALS = (MspdiError, StoreError, ImportRefused, BaselineRefused, OSError)  # OSError: e.g. a missing file
+# A refusal prints one error line and exits 1; OSError covers a missing file.
+REFUSALS = (MspdiError, StoreError, ImportRefused, BaselineRefused, SyncRefused, ReviewRefused, OSError)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,6 +50,35 @@ def build_parser() -> argparse.ArgumentParser:
     reb.add_argument("--confirm", action="store_true", help="required: the new baseline can never be removed")
     reb.add_argument("--reason", metavar="TEXT", help="required: why the baseline is being reset")
     reb.set_defaults(run=_rebaseline)
+
+    sync_parser = commands.add_parser("sync", help="run progress updates through the guard")
+    sync_commands = sync_parser.add_subparsers(dest="sync_command", required=True, metavar="COMMAND")
+    for name, help_text in (("now", "run a sync now"), ("daily", "the same, recorded as the daily run")):
+        run = sync_commands.add_parser(name, parents=[db], help=help_text)
+        run.add_argument(
+            "--source", required=True, metavar="file:PATH", help="where the updates come from: a JSON Lines file"
+        )
+        run.set_defaults(run=_sync, trigger=name)
+
+    again = commands.add_parser("rerun", parents=[db], help="process again what a run captured, as a new run")
+    again.add_argument("run_id", metavar="RUN_ID")
+    again.set_defaults(run=_rerun)
+
+    runs = commands.add_parser("runs", help="list sync runs")
+    runs_commands = runs.add_subparsers(dest="runs_command", required=True, metavar="COMMAND")
+    runs_commands.add_parser("list", parents=[db], help="every run, oldest first").set_defaults(run=_runs_list)
+
+    conflicts = commands.add_parser("conflicts", help="review conflicts: list them, dismiss one with a note")
+    conflict_commands = conflicts.add_subparsers(dest="conflicts_command", required=True, metavar="COMMAND")
+    listing = conflict_commands.add_parser("list", parents=[db], help="open conflicts")
+    listing.add_argument("--all", action="store_true", help="dismissed ones too")
+    listing.set_defaults(run=_conflicts_list)
+    dismissal = conflict_commands.add_parser(
+        "dismiss", parents=[db], help="dismiss an open conflict; the update is never applied"
+    )
+    dismissal.add_argument("id", type=int, metavar="ID")
+    dismissal.add_argument("--note", metavar="TEXT", help="required: why it is dismissed")
+    dismissal.set_defaults(run=_conflicts_dismiss)
     return parser
 
 
@@ -102,6 +135,79 @@ def _rebaseline(args: argparse.Namespace) -> int:
     finally:
         conn.close()
     print(f"added baseline {number} from the current planned values and locked it")
+    return 0
+
+
+def _sync(args: argparse.Namespace) -> int:
+    kind, _, path = args.source.partition(":")
+    if kind != "file" or not path:
+        raise SyncRefused(f"the source must be file:<path>, not {args.source!r}")
+    return _report(sync(args.db, FileSource(path), trigger=args.trigger, clock=_now))
+
+
+def _rerun(args: argparse.Namespace) -> int:
+    return _report(rerun(args.db, args.run_id, clock=_now))
+
+
+def _report(result: RunResult) -> int:
+    print(_run_line(result))
+    if result.status != "ok":
+        print(f"schedule-guard: error: run {result.run_id} failed: {_printable(result.error or '')}", file=sys.stderr)
+        return 1
+    return 0
+
+
+def _run_line(run: RunResult) -> str:
+    line = (
+        f"run {run.run_id} {run.trigger} {run.status}: {run.seen} seen, {run.applied} applied,"
+        f" {run.conflicts} conflicts, {run.duplicates} duplicates"
+    )
+    if run.rerun_of:
+        line += f"; rerun of {run.rerun_of}"
+    return line
+
+
+def _runs_list(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    try:
+        runs = list_runs(conn)
+    finally:
+        conn.close()
+    for run in runs:
+        error = f"; error: {_printable(run.error)}" if run.error else ""
+        print(f"{run.started_at} {_run_line(run)}{error}")
+    if not runs:
+        print("no runs yet")
+    return 0
+
+
+def _conflicts_list(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    try:
+        conflicts = list_conflicts(conn, include_dismissed=args.all)
+    finally:
+        conn.close()
+    for c in conflicts:
+        task = "-" if c.task_uid is None else c.task_uid
+        line = (
+            f"{c.id} {c.status} {c.reason}: task {task}, item {c.source}:{_printable(c.source_item_id)}"
+            f" version {_printable(c.item_version)}: {_printable(c.detail or '')}"
+        )
+        if c.note:
+            line += f"; note: {_printable(c.note)}"
+        print(line)
+    if not conflicts:
+        print("no conflicts" if args.all else "no open conflicts")
+    return 0
+
+
+def _conflicts_dismiss(args: argparse.Namespace) -> int:
+    conn = open_db(args.db)
+    try:
+        dismiss(conn, args.id, args.note, now=_now())
+    finally:
+        conn.close()
+    print(f"dismissed conflict {args.id}; the update stays unapplied")
     return 0
 
 

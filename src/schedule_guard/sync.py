@@ -79,7 +79,7 @@ def rerun(db_path: str | Path, run_id: str, *, clock: Clock = system_clock) -> R
     with closing(open_db(db_path)) as conn:
         row = conn.execute("SELECT source FROM sync_run WHERE id = ?", (run_id,)).fetchone()
     if row is None:
-        raise SyncRefused(f"there is no run {run_id}")
+        raise SyncRefused(f"there is no run {run_id!r}")
 
     def capture(conn: sqlite3.Connection, new_id: str) -> None:
         with transaction(conn):
@@ -90,7 +90,7 @@ def rerun(db_path: str | Path, run_id: str, *, clock: Clock = system_clock) -> R
 
 
 def list_runs(conn: sqlite3.Connection) -> list[RunResult]:
-    return [RunResult(*row) for row in conn.execute(f"SELECT {_RUN_COLUMNS} FROM sync_run ORDER BY started_at, id")]
+    return [RunResult(*row) for row in conn.execute(f"SELECT {_RUN_COLUMNS} FROM sync_run ORDER BY started_at, rowid")]
 
 
 _RUN_COLUMNS = (

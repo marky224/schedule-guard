@@ -121,16 +121,17 @@ CLI (Phase 1):
 | `schedule-guard import --db <path> <file.xml>` | Parses the MSPDI file, then stores the project, master schedule, baselines and raw file bytes. Works only on an empty project. |
 | `schedule-guard baseline lock --db <path> [--number N]` | Locks a baseline that was imported (Baseline 0 by default). Locked baselines are read-only. |
 | `schedule-guard rebaseline --db <path> --confirm --reason "..."` | Admin only. Appends a new baseline number built from the current planned values, and locks it. Old baselines never change (Q7). Refuses past baseline number 10 (Project's Baseline + Baseline1–10: **UNVERIFIED**, [L14] gives no range; checked in M7). |
-| `schedule-guard sync now [--source file:<path>]` | Runs a sync immediately. Records a run with an id. |
-| `schedule-guard sync daily` | Same as `sync now`, labelled `daily`. The timer calls this one. |
-| `schedule-guard rerun <run-id>` | Reprocesses the source items that run captured. Keys already decided count as duplicates. Records a new run with `rerun_of`. |
-| `schedule-guard runs list` / `conflicts list` / `conflicts dismiss <id> --note` | Inspect runs and conflicts. Dismiss a conflict with a note. |
+| `schedule-guard sync now --db <path> --source file:<path>` | Runs a sync immediately. Records a run with an id. |
+| `schedule-guard sync daily --db <path> --source file:<path>` | Same as `sync now`, labelled `daily`. The timer calls this one. |
+| `schedule-guard rerun --db <path> <run-id>` | Reprocesses the source items that run captured. Keys already decided count as duplicates. Records a new run with `rerun_of`. |
+| `schedule-guard runs list --db <path>` / `conflicts list --db <path> [--all]` / `conflicts dismiss --db <path> <id> --note "..."` | Inspect runs and conflicts. Dismiss a conflict with a note; it is never applied. |
 | `schedule-guard report [--port 8000]` | Serves the read-only HTML report on 127.0.0.1. |
 | `schedule-guard demo [--db <path>]` | Builds a fresh demo DB from the fixture and scripted updates (some applied, some conflicts), then serves the report. |
 | `schedule-guard export <out.xml>` | Phase 2 (offline). Writes MSPDI with progress applied and the baseline untouched. |
 
-`import`, `baseline lock` and `rebaseline` take `--db <path>` (required); the
-file lives outside the repo or in a gitignored path (§4).
+Every command that uses the database takes `--db <path>` (required); the
+file lives outside the repo or in a gitignored path (§4). In Phase 1, `sync`
+also needs `--source file:<path>`, a JSON Lines update file (§6).
 
 Runtime deps: `fastapi`, `uvicorn`, `jinja2`, `defusedxml`. Phase 2 adds `msal`
 and `httpx`. Dev deps: `pytest`, `hypothesis`, `httpx` (for TestClient).
