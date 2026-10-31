@@ -398,6 +398,15 @@ def test_open_db_refuses_a_version_2_database_from_before_sync(tmp_path):
         open_db(path)
 
 
+def test_open_db_refuses_a_version_3_database_from_before_the_interrupted_status(tmp_path):
+    path = tmp_path / "m4.db"
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute("CREATE TABLE sync_run (id)")
+        conn.execute("PRAGMA user_version = 3")
+    with pytest.raises(StoreError, match=f"schema version 3; this schedule-guard uses {SCHEMA_VERSION}"):
+        open_db(path)
+
+
 def test_the_sync_tables_have_the_planned_columns(tmp_path):
     with closing(open_db(tmp_path / "new.db", create=True)) as conn:
         columns = {

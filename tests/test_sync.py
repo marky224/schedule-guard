@@ -222,6 +222,30 @@ def test_a_run_stopped_halfway_and_rerun_ends_as_an_uninterrupted_run(fresh_db, 
     assert state(stopped) == state(uninterrupted)
 
 
+@pytest.mark.parametrize("next_run", ["sync", "rerun"])
+def test_the_next_run_marks_a_killed_run_interrupted_and_it_can_still_be_rerun(fresh_db, monkeypatch, next_run):
+    uninterrupted, stopped = fresh_db(), fresh_db()
+    sync(uninterrupted, FileSource(WEEK_44), clock=CLOCK)
+    crash_on(monkeypatch, 3, Crash)
+    with pytest.raises(Crash):
+        sync(stopped, FileSource(WEEK_44), clock=CLOCK)
+    monkeypatch.undo()
+    with closing(open_db(stopped)) as conn:
+        (killed,) = conn.execute("SELECT id FROM sync_run WHERE status = 'running'").fetchone()
+    if next_run == "sync":
+        later = sync(stopped, FileSource(WEEK_44), clock=CLOCK)
+    else:
+        later = rerun(stopped, killed, clock=CLOCK)
+    assert later.status == "ok"
+    with closing(open_db(stopped)) as conn:
+        assert conn.execute("SELECT id, status, finished_at FROM sync_run ORDER BY rowid").fetchall() == [
+            (killed, "interrupted", None), (later.run_id, "ok", later.finished_at),
+        ]
+    again = rerun(stopped, killed, clock=CLOCK)
+    assert (again.status, again.applied, again.conflicts) == ("ok", 0, 0)
+    assert state(stopped) == state(uninterrupted)
+
+
 def test_a_rerun_after_a_complete_run_gives_only_duplicates(fixture_db):
     first = sync(fixture_db, FileSource(WEEK_44), clock=CLOCK)
     before = state(fixture_db)

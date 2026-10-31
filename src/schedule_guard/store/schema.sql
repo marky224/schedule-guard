@@ -1,4 +1,4 @@
--- schedule-guard SQLite schema, version 3 (PLAN.md section 4).
+-- schedule-guard SQLite schema, version 4 (PLAN.md section 4).
 --
 -- project, task, baseline and baseline_task hold the imported file, the
 -- master schedule and the baselines. On any connection that leaves triggers
@@ -214,7 +214,7 @@ CREATE TABLE sync_run (
     source      TEXT NOT NULL,
     started_at  TEXT NOT NULL,
     finished_at TEXT,
-    status      TEXT NOT NULL CHECK (status IN ('running', 'ok', 'failed')),
+    status      TEXT NOT NULL CHECK (status IN ('running', 'ok', 'failed', 'interrupted')),
     seen        INTEGER NOT NULL DEFAULT 0,
     applied     INTEGER NOT NULL DEFAULT 0,
     conflicts   INTEGER NOT NULL DEFAULT 0,

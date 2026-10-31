@@ -11,10 +11,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
-# Version 1 (the M2 build) had no task_progress and version 2 (M3) no sync
-# tables. Nothing was released, so there is no upgrade from either: such a
-# file is refused like any other version, not opened to fail at its first sync.
-SCHEMA_VERSION = 3
+# Version 1 (the M2 build) had no task_progress, version 2 (M3) no sync
+# tables, and version 3 (M4 as first built) no 'interrupted' run status.
+# Nothing was released, so there is no upgrade from any of them: such a file
+# is refused like any other version, not opened to fail at its first sync.
+SCHEMA_VERSION = 4
 SCHEMA = Path(__file__).with_name("schema.sql")
 
 

@@ -16,7 +16,9 @@ its source couldn't decode or key is a `malformed` conflict.
 
 If a run stops halfway, `rerun` captures the same items again and
 processes them the same way: decided keys come back as duplicates, the rest
-are decided as the first run would have. Sync never imports the baseline
+are decided as the first run would have. A run killed partway is left
+`running`; the next run to start holds the lock, so it knows no other run
+is alive and marks that one `interrupted`. Sync never imports the baseline
 commands.
 """
 
@@ -126,6 +128,8 @@ def _run(
             raise SyncRefused("no project has been imported into this database")
         run_id = str(uuid.uuid4())
         with transaction(conn):
+            # This run holds the lock, so no other run is alive: one still running was killed.
+            conn.execute("UPDATE sync_run SET status = 'interrupted' WHERE status = 'running'")
             conn.execute(
                 "INSERT INTO sync_run (id, trigger, rerun_of, source, started_at, status) VALUES (?, ?, ?, ?, ?, 'running')",
                 (run_id, trigger, rerun_of, source_spec, _stamp(clock)),
@@ -134,7 +138,7 @@ def _run(
             capture(conn, run_id)
             for update_id in _in_order(conn, run_id):
                 _process(conn, run_id, update_id, clock)
-        except Exception as exc:  # the run fails; a BaseException such as a kill leaves it running, for rerun
+        except Exception as exc:  # the run fails; a BaseException such as a kill leaves it running
             status, error = "failed", f"{type(exc).__name__}: {exc}"
         else:
             status, error = "ok", None
