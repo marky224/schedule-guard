@@ -1,0 +1,14 @@
+{"source_item_id": "u-001", "item_version": 1, "task_uid": 3, "made_against_version": 0, "fields": {"percent_complete": 40, "actual_start": "2026-06-08T08:00:00", "remaining_work": 58}, "submitted_at": "2026-10-26T16:10:00-05:00", "submitted_by": "Fencing crew (demo)"}
+{"source_item_id": "u-002", "item_version": 1, "task_uid": 4, "made_against_version": 0, "fields": {"percent_complete": 20, "actual_start": "2026-06-15T08:00:00"}, "submitted_at": "2026-10-27T09:00:00-05:00", "submitted_by": "Grading crew (demo)"}
+{"source_item_id": "u-003", "item_version": 1, "task_uid": 4, "made_against_version": 0, "fields": {"percent_complete": 25}, "submitted_at": "2026-10-27T10:30:00-05:00", "submitted_by": "Site lead (demo)"}
+{"source_item_id": "u-004", "item_version": 1, "task_uid": 5, "made_against_version": 0, "fields": {"percent_complete": 10, "Proposed Finish": "2026-07-31T17:00:00"}, "submitted_at": "2026-10-27T11:00:00-05:00", "submitted_by": "Utilities crew (demo)"}
+{"source_item_id": "u-005", "item_version": 1, "task_uid": 1, "made_against_version": 0, "fields": {"percent_complete": 50}, "submitted_at": "2026-10-27T12:00:00-05:00", "submitted_by": "Site lead (demo)"}
+{"source_item_id": "u-006", "item_version": 1, "task_uid": 7, "made_against_version": 0, "fields": {"percent_complete": 150}, "submitted_at": "2026-10-27T13:00:00-05:00", "submitted_by": "Utilities crew (demo)"}
+{"source_item_id": "u-007", "item_version": 1, "task_uid": 99, "made_against_version": 0, "fields": {"percent_complete": 10}, "submitted_at": "2026-10-27T14:00:00-05:00", "submitted_by": "Site lead (demo)"}
+{"source_item_id": "u-008", "item_version": 1, "task_uid": 8, "made_against_version": 0, "fields": {"percent_complete": 100}, "submitted_at": "2026-10-28T08:30:00-05:00", "submitted_by": "Grading crew (demo)"}
+this line is not JSON
+{"task_uid": 3, "made_against_version": 1, "fields": {"notes": "no key"}, "submitted_at": "2026-10-28T09:00:00-05:00", "submitted_by": "Site lead (demo)"}
+{"source_item_id": "u-001", "item_version": 1, "task_uid": 3, "made_against_version": 0, "fields": {"percent_complete": 40, "actual_start": "2026-06-08T08:00:00", "remaining_work": 58}, "submitted_at": "2026-10-26T16:10:00-05:00", "submitted_by": "Fencing crew (demo)"}
+{"source_item_id": "u-009", "item_version": 1, "task_uid": 3, "made_against_version": 1, "fields": {"notes": "Fence inspected, gate hung"}, "submitted_at": "2026-10-28T15:00:00-05:00", "submitted_by": "Site lead (demo)"}
+{"source_item_id": "u-010", "item_version": 1, "task_uid": 2, "made_against_version": 0, "fields": {"percent_complete": 100, "actual_start": "2026-06-01T08:00:00", "actual_finish": "2026-06-01T08:00:00"}, "submitted_at": "2026-10-29T07:45:00-05:00", "submitted_by": "Site lead (demo)"}
+{"source_item_id": "u-011", "item_version": 1, "task_uid": 4, "made_against_version": 1, "fields": {"remaining_work": 120}, "submitted_at": "2026-10-27T15:00:00Z", "submitted_by": "Grading crew (demo)"}

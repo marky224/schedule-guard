@@ -1,17 +1,24 @@
 """Sync: one transaction per item, exactly once, in (submitted_at, source_item_id) order."""
 
+import fcntl
 import json
+import os
+import shutil
 from contextlib import closing
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 
+from schedule_guard import progress
 from schedule_guard.clock import fixed_clock
+from schedule_guard.importer import import_file
 from schedule_guard.sources.file import FileSource
 from schedule_guard.store.db import open_db
-from schedule_guard.sync import rerun, sync
+from schedule_guard.sync import SyncRefused, rerun, sync
 
 CLOCK = fixed_clock(datetime(2026, 10, 30, 17, 0, tzinfo=UTC))
+WEEK_44 = Path(__file__).resolve().parent / "fixtures" / "updates" / "week-44.jsonl"
 
 
 def line(source_item_id, task_uid=3, made_against_version=0, fields=None, submitted_at="2026-10-26T16:00:00-05:00",
@@ -41,6 +48,195 @@ def test_a_run_decides_each_item_once_and_a_second_run_sees_duplicates(fixture_d
         assert conn.execute("SELECT status, reason_code FROM outcome ORDER BY update_id").fetchall() == [
             ("applied", None), ("conflict", "field_not_allowed"),
         ]
+
+
+def state(db) -> dict:
+    """What a run leaves behind, keyed by item rather than by row id."""
+    with closing(open_db(db)) as conn:
+        return {
+            "progress": conn.execute("SELECT * FROM task_progress ORDER BY task_uid").fetchall(),
+            "outcomes": conn.execute(
+                "SELECT su.source_item_id, o.status, o.reason_code, o.detail, o.decided_at, o.before_json, o.after_json"
+                " FROM outcome o JOIN source_update su ON su.id = o.update_id ORDER BY su.source_item_id"
+            ).fetchall(),
+            "conflicts": conn.execute(
+                "SELECT su.source_item_id, c.reason_code, c.status FROM conflict c"
+                " JOIN source_update su ON su.id = c.update_id ORDER BY su.source_item_id"
+            ).fetchall(),
+        }
+
+
+def outcomes(db) -> dict:
+    return {sid: (status, reason) for sid, status, reason, *_ in state(db)["outcomes"]}
+
+
+def test_the_week_44_file(fixture_db):
+    result = sync(fixture_db, FileSource(WEEK_44), clock=CLOCK)
+    assert (result.status, result.seen, result.applied, result.conflicts, result.duplicates) == ("ok", 14, 5, 8, 1)
+    decided = outcomes(fixture_db)
+    unkeyed = {status_reason for sid, status_reason in decided.items() if sid.startswith("unkeyed/")}
+    assert {sid: v for sid, v in decided.items() if not sid.startswith("unkeyed/")} == {
+        "u-001": ("applied", None),
+        "u-002": ("applied", None),
+        "u-011": ("applied", None),  # 15:00 UTC is 10:00 in Chicago, after u-002 and before u-003
+        "u-003": ("conflict", "stale_version"),  # made against version 0 too, but later
+        "u-004": ("conflict", "field_not_allowed"),
+        "u-005": ("conflict", "summary_task"),
+        "u-006": ("conflict", "invalid_value"),
+        "u-007": ("conflict", "unknown_task"),
+        "u-008": ("conflict", "inconsistent_actuals"),
+        "u-009": ("applied", None),
+        "u-010": ("applied", None),
+    }
+    assert unkeyed == {("conflict", "malformed")} and len(decided) == 13  # the repeated u-001 line is a duplicate
+    with closing(open_db(fixture_db)) as conn:
+        fence = conn.execute(
+            "SELECT version, percent_complete, actual_start, remaining_work, notes, last_update_id FROM task_progress"
+            " WHERE task_uid = 3"
+        ).fetchone()
+        last = conn.execute("SELECT id FROM source_update WHERE source_item_id = 'u-009'").fetchone()[0]
+        milestone = conn.execute("SELECT percent_complete, actual_finish FROM task_progress WHERE task_uid = 2").fetchone()
+    assert fence == (2, 40, "2026-06-08T08:00:00", "PT58H0M0S",
+                     "[2026-10-28, file, Site lead (demo)] Fence inspected, gate hung", last)
+    assert milestone == (100, "2026-06-01T08:00:00")
+
+
+def test_the_same_file_again_changes_nothing(fixture_db):
+    sync(fixture_db, FileSource(WEEK_44), clock=CLOCK)
+    before = state(fixture_db)
+    again = sync(fixture_db, FileSource(WEEK_44), clock=CLOCK)
+    assert (again.seen, again.applied, again.conflicts, again.duplicates) == (14, 0, 0, 14)
+    assert state(fixture_db) == before
+
+
+def test_of_two_updates_made_against_one_version_the_first_applies(fixture_db, tmp_path):
+    # Written latest first: the order is (submitted_at, source_item_id), not the file's.
+    source = write(
+        tmp_path,
+        line("b-late", fields={"percent_complete": 30}, submitted_at="2026-10-27T11:00:00-05:00"),
+        line("b-early", fields={"percent_complete": 20}, submitted_at="2026-10-27T15:59:00Z"),  # 10:59 in Chicago
+        line("a-tie", fields={"percent_complete": 10}, submitted_at="2026-10-27T11:00:00-05:00"),
+    )
+    sync(fixture_db, source, clock=CLOCK)
+    assert outcomes(fixture_db) == {
+        "b-early": ("applied", None), "a-tie": ("conflict", "stale_version"), "b-late": ("conflict", "stale_version"),
+    }
+
+
+def test_an_item_without_a_usable_submitted_at_is_malformed(fixture_db, tmp_path):
+    source = write(tmp_path, line("u-001"), line("u-000", submitted_at="last tuesday"))
+    sync(fixture_db, source, clock=CLOCK)
+    assert outcomes(fixture_db) == {"u-000": ("conflict", "malformed"), "u-001": ("applied", None)}
+
+
+def test_a_key_given_twice_in_one_run_is_decided_once_on_its_first_content(fixture_db, tmp_path):
+    source = write(tmp_path, line("u-001", fields={"percent_complete": 25}), line("u-001", fields={"percent_complete": 90}))
+    result = sync(fixture_db, source, clock=CLOCK)
+    assert (result.seen, result.applied, result.duplicates) == (2, 1, 1)
+    with closing(open_db(fixture_db)) as conn:
+        assert conn.execute("SELECT percent_complete FROM task_progress WHERE task_uid = 3").fetchone() == (25,)
+        assert conn.execute("SELECT count(*) FROM source_update").fetchone() == (1,)
+
+
+def test_an_unusable_line_is_one_malformed_conflict_on_every_run(fixture_db, tmp_path):
+    source = write(tmp_path, "this is not json", '{"no": "key"}')
+    first = sync(fixture_db, source, clock=CLOCK)
+    assert (first.conflicts, first.duplicates) == (2, 0)
+    second = sync(fixture_db, source, clock=CLOCK)
+    assert (second.conflicts, second.duplicates) == (0, 2)
+    assert sorted(reason for _, reason, _ in state(fixture_db)["conflicts"]) == ["malformed", "malformed"]
+
+
+def test_a_second_run_at_the_same_time_is_refused(fixture_db, tmp_path):
+    source = write(tmp_path, line("u-001"))
+    with open(f"{fixture_db}.lock", "a") as held:  # another run's open lock file
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(SyncRefused, match="another sync run is in progress"):
+            sync(fixture_db, source, clock=CLOCK)
+        with closing(open_db(fixture_db)) as conn:
+            assert conn.execute("SELECT count(*) FROM sync_run").fetchone() == (0,)
+    assert sync(fixture_db, source, clock=CLOCK).applied == 1  # the lock is free again
+
+
+class Crash(BaseException):
+    """Stands in for the process dying: not an Exception, so the run is left running."""
+
+
+def crash_on(monkeypatch, nth: int, error: type[BaseException]):
+    """Make the nth applied update stop the run right after its progress write."""
+    real, calls = progress.apply_progress, []
+
+    def apply_then_stop(conn, outcome, **kwargs):
+        real(conn, outcome, **kwargs)
+        calls.append(outcome)
+        if len(calls) == nth:
+            raise error("stopped after a progress write")
+
+    monkeypatch.setattr(progress, "apply_progress", apply_then_stop)
+
+
+@pytest.mark.parametrize(("error", "status"), [(RuntimeError, "failed"), (Crash, "running")], ids=["error", "killed"])
+def test_a_run_stopped_halfway_and_rerun_ends_as_an_uninterrupted_run(fresh_db, monkeypatch, error, status):
+    uninterrupted, stopped = fresh_db(), fresh_db()
+    sync(uninterrupted, FileSource(WEEK_44), clock=CLOCK)
+    crash_on(monkeypatch, 3, error)
+    if error is Crash:
+        with pytest.raises(Crash):
+            sync(stopped, FileSource(WEEK_44), clock=CLOCK)
+        with closing(open_db(stopped)) as conn:
+            (run_id, run_status) = conn.execute("SELECT id, status FROM sync_run").fetchone()
+    else:
+        result = sync(stopped, FileSource(WEEK_44), clock=CLOCK)
+        run_id, run_status = result.run_id, result.status
+        assert result.error == "RuntimeError: stopped after a progress write"
+    assert run_status == status
+    assert state(stopped) != state(uninterrupted)  # it really stopped partway
+    monkeypatch.undo()
+    again = rerun(stopped, run_id, clock=CLOCK)
+    assert again.status == "ok" and again.duplicates > 0
+    assert state(stopped) == state(uninterrupted)
+
+
+def test_a_rerun_after_a_complete_run_gives_only_duplicates(fixture_db):
+    first = sync(fixture_db, FileSource(WEEK_44), clock=CLOCK)
+    before = state(fixture_db)
+    again = rerun(fixture_db, first.run_id, clock=CLOCK)
+    assert (again.seen, again.applied, again.conflicts, again.duplicates) == (13, 0, 0, 13)  # one per key captured
+    assert state(fixture_db) == before
+
+
+def test_a_source_that_cant_be_read_fails_the_run_and_captures_nothing(fixture_db, tmp_path):
+    result = sync(fixture_db, FileSource(tmp_path / "missing.jsonl"), clock=CLOCK)
+    assert (result.status, result.seen) == ("failed", 0)
+    assert result.error.startswith("SourceError: can't read the update file")
+    with closing(open_db(fixture_db)) as conn:
+        assert conn.execute("SELECT count(*) FROM source_update").fetchone() == (0,)
+
+
+def test_sync_needs_an_imported_project(tmp_path):
+    empty = tmp_path / "empty.db"
+    open_db(empty, create=True).close()
+    with pytest.raises(SyncRefused, match="no project has been imported"):
+        sync(empty, write(tmp_path, line("u-001")), clock=CLOCK)
+
+
+def test_a_missing_database_is_refused_without_leaving_a_lock_file(tmp_path):
+    with pytest.raises(Exception, match="can't open database"):
+        sync(tmp_path / "typo.db", write(tmp_path, line("u-001")), clock=CLOCK)
+    assert not (tmp_path / "typo.db.lock").exists()
+
+
+def test_a_task_imported_complete_without_a_finish_refuses_a_notes_update(tmp_path):
+    xml = tmp_path / "done.xml"
+    xml.write_text(
+        '<Project xmlns="http://schemas.microsoft.com/project"><Tasks><Task><UID>3</UID>'
+        "<PercentComplete>100</PercentComplete></Task></Tasks></Project>"
+    )
+    db = tmp_path / "done.db"
+    with closing(open_db(db, create=True)) as conn:
+        import_file(conn, xml, now=datetime(2026, 10, 30, 12, tzinfo=UTC))
+    sync(db, write(tmp_path, line("u-001", fields={"notes": "Punch list done"})), clock=CLOCK)
+    assert outcomes(db) == {"u-001": ("conflict", "inconsistent_actuals")}
 
 
 # The CLI
