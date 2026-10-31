@@ -368,9 +368,9 @@ specific tests it names.
 Property tests (Hypothesis). Strategies generate arbitrary sequences of
 updates: valid, stale, duplicate, unknown task, forbidden fields, bad values,
 and mixed fields. Each test runs them through the real sync engine on a
-temp-file SQLite DB loaded from the fixture. Until the sync engine exists
-(M4), the M3 tests run them through the guard and the applier
-(`progress.py`) the same way, one transaction per update.
+temp-file SQLite DB loaded from the fixture: each example writes batches of
+updates to an update file and runs `sync` once per batch, earlier lines
+coming back as duplicates.
 
 | ID | Property |
 | --- | --- |
