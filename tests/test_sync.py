@@ -147,6 +147,31 @@ def test_an_unusable_line_is_one_malformed_conflict_on_every_run(fixture_db, tmp
     assert sorted(reason for _, reason, _ in state(fixture_db)["conflicts"]) == ["malformed", "malformed"]
 
 
+LONE_SURROGATE = {
+    "submitted-by": {"submitted_by": "Crew \ud800"},
+    "submitted-at": {"submitted_at": "2026-10-26T16:00:00-05:00\udfff"},
+    "field-value": {"fields": {"notes": "Gate \udc00 hung"}},
+    "field-name": {"fields": {"notes\ud83d": "Gate hung"}},
+    "key": {"\udbff": 1},
+}
+
+
+@pytest.mark.parametrize("change", LONE_SURROGATE.values(), ids=LONE_SURROGATE.keys())
+def test_a_line_with_a_lone_surrogate_is_malformed_and_every_other_line_is_decided(fixture_db, tmp_path, change):
+    # json.dumps writes each lone surrogate as an escape, such as \ud800.
+    bad = {**json.loads(line("u-bad", task_uid=4)), **change}
+    source = write(tmp_path, line("u-001"), json.dumps(bad), line("u-002", task_uid=5))
+    first = sync(fixture_db, source, clock=CLOCK)
+    assert (first.status, first.seen, first.applied, first.conflicts, first.error) == ("ok", 3, 2, 1, None)
+    again = sync(fixture_db, source, clock=CLOCK)
+    assert (again.status, again.duplicates) == ("ok", 3)
+    decided = {sid: (status, reason, detail) for sid, status, reason, detail, *_ in state(fixture_db)["outcomes"]}
+    assert decided.pop("u-001")[0] == decided.pop("u-002")[0] == "applied"
+    ((status, reason, detail),) = decided.values()  # the bad line, keyed by its bytes
+    assert (status, reason) == ("conflict", "malformed")
+    assert detail.startswith("the line is not JSON: a string holds a lone surrogate, U+D")
+
+
 def test_a_second_run_at_the_same_time_is_refused(fixture_db, tmp_path):
     source = write(tmp_path, line("u-001"))
     with open(f"{fixture_db}.lock", "a") as held:  # another run's open lock file

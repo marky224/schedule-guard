@@ -9,7 +9,7 @@ from schedule_guard.sources.file import MAX_FILE_BYTES, FileSource
 
 @pytest.mark.parametrize(
     "text",
-    ['{"a": 1, "b": [true, null, 2.5]}', '"text"', "[]", '{"nested": {"a": {"b": 1}}}'],
+    ['{"a": 1, "b": [true, null, 2.5]}', '"text"', "[]", '{"nested": {"a": {"b": 1}}}', '"\\ud83d\\ude00"'],
 )
 def test_decode_json_reads_strict_json_like_json_loads(text):
     assert decode_json(text) == json.loads(text)
@@ -25,8 +25,13 @@ def test_decode_json_reads_strict_json_like_json_loads(text):
         ('{"fields": {"notes": "a", "notes": "b"}}', "the key 'notes' appears twice"),
         ("[" * 100_000, "nested too deeply"),
         ("{'single': 'quotes'}", "Expecting property name"),
+        ('{"submitted_by": "Crew \\ud800"}', "a string holds a lone surrogate, U\\+D800"),
+        ('{"\\udfff": 1}', "lone surrogate, U\\+DFFF"),
+        ('{"fields": {"notes": [["a", "b\\udc00"]]}}', "lone surrogate, U\\+DC00"),
+        ('"\\ude00\\ud83d"', "lone surrogate"),  # a pair the wrong way round is two lone ones
     ],
-    ids=["nan", "infinity", "minus-infinity", "repeated-key", "repeated-nested-key", "too-deep", "not-json"],
+    ids=["nan", "infinity", "minus-infinity", "repeated-key", "repeated-nested-key", "too-deep", "not-json",
+         "lone-surrogate", "lone-surrogate-key", "lone-surrogate-nested", "pair-reversed"],
 )
 def test_decode_json_refuses_what_json_loads_would_let_through_or_fail_on(text, message):
     with pytest.raises(ValueError, match=message):
@@ -78,6 +83,7 @@ UNUSABLE = {
     "not-utf-8": (b'{"source_item_id": "u-1\x9b"}', "the line is not UTF-8"),
     "nan": (json.dumps(line()).replace("25", "NaN").encode(), "NaN is not JSON"),
     "repeated-key": (b'{"source_item_id": "a", "source_item_id": "b", "item_version": 1}', "appears twice"),
+    "lone-surrogate": (json.dumps(line(submitted_by="Crew \ud800")).encode(), "lone surrogate, U+D800"),
     "not-an-object": (b"[1, 2]", "no usable key"),
     "no-item-id": (json.dumps({k: v for k, v in line().items() if k != "source_item_id"}).encode(), "no usable key"),
     "no-version": (json.dumps({k: v for k, v in line().items() if k != "item_version"}).encode(), "no usable key"),

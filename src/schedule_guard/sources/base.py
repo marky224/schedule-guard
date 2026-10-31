@@ -11,10 +11,12 @@ later run that reads the same bytes sees a duplicate.
 
 import hashlib
 import json
+import re
 from dataclasses import dataclass
 from typing import Protocol
 
 UNKEYED = "unkeyed/"  # "/" can't appear in a source_item_id a source accepts
+_SURROGATE = re.compile(r"[\ud800-\udfff]")  # json.loads joins a valid pair into one character, so any left is lone
 
 
 class SourceError(Exception):
@@ -43,7 +45,12 @@ def unkeyed(raw: bytes, text: str, problem: str) -> SourceItem:
 
 
 def decode_json(text: str) -> object:
-    """Strict JSON: no NaN or Infinity, and no key twice in one object."""
+    """Strict JSON: no NaN or Infinity, no key twice in one object, and no lone surrogate in any string.
+
+    A lone surrogate escape such as "\\ud800" decodes to a str that isn't
+    Unicode text: SQLite can't store it as UTF-8, so a decoded item never
+    holds one, in a value or a key at any depth.
+    """
 
     def refuse_constant(name: str) -> object:
         raise ValueError(f"{name} is not JSON")
@@ -57,6 +64,17 @@ def decode_json(text: str) -> object:
         return obj
 
     try:
-        return json.loads(text, parse_constant=refuse_constant, object_pairs_hook=one_value_per_key)
+        value = json.loads(text, parse_constant=refuse_constant, object_pairs_hook=one_value_per_key)
     except RecursionError as exc:
         raise ValueError("nested too deeply") from exc
+    pending = [value]  # a loop, not recursion: the value may be nested nearly as deep as json.loads goes
+    while pending:
+        item = pending.pop()
+        if isinstance(item, dict):
+            pending.extend(item.keys())
+            pending.extend(item.values())
+        elif isinstance(item, list):
+            pending.extend(item)
+        elif isinstance(item, str) and (surrogate := _SURROGATE.search(item)):
+            raise ValueError(f"a string holds a lone surrogate, U+{ord(surrogate.group()):04X}")
+    return value
