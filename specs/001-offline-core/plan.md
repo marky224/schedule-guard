@@ -34,8 +34,10 @@
   `tests/properties/test_teeth.py`, `tests/conftest.py`
 - Create (M4): `src/schedule_guard/sources/__init__.py`,
   `src/schedule_guard/sources/base.py`, `src/schedule_guard/sources/file.py`,
-  `src/schedule_guard/sync.py`, `tests/fixtures/updates/*.jsonl`,
-  `tests/test_sync.py`, `tests/properties/test_sync_properties.py`,
+  `src/schedule_guard/sync.py`, `src/schedule_guard/review.py`,
+  `tests/fixtures/updates/*.jsonl`, `tests/test_sources.py`,
+  `tests/test_sync.py`, `tests/test_review.py`,
+  `tests/properties/test_sync_properties.py`,
   `tests/properties/test_state_machine.py`
 - Create (M5): `src/schedule_guard/report/__init__.py`,
   `src/schedule_guard/report/app.py`, `src/schedule_guard/report/templates/*.html`,

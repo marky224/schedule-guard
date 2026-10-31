@@ -78,7 +78,7 @@ Everything runs on one Linux PC. All network calls go out from it: Graph,
 the Entra token endpoint, and the Workflows trigger URL. Nothing listens for
 inbound traffic. The report binds to `127.0.0.1`.
 
-### Layout (`[M0]`, `[M1]`, `[M2]`, `[M3]` = exists since that milestone; everything else comes in later runs)
+### Layout (`[M0]`, `[M1]`, `[M2]`, `[M3]`, `[M4]` = exists since that milestone; everything else comes in later runs)
 
 ```
 pyproject.toml, uv.lock              [M0] uv-managed, Python 3.12
@@ -96,9 +96,10 @@ src/schedule_guard/                  [M0]
   clock.py                           [M3] injectable clock; today is the America/Chicago date
   guard.py                           [M3] pure rules: (task state, update) -> outcome
   progress.py                        [M3] load a task's state, apply an outcome to task_progress
-  sync.py                            runs, idempotency, rerun
-  sources/base.py                    SourceAdapter protocol
-  sources/file.py                    Phase 1 file/fixture source
+  sync.py                            [M4] runs, idempotency, rerun, the lock file
+  review.py                          [M4] list conflicts, dismiss one with a note
+  sources/base.py                    [M4] SourceAdapter protocol, strict JSON
+  sources/file.py                    [M4] Phase 1 file/fixture source
   sources/graph.py                   Phase 2 delta source
   graph/auth.py, graph/client.py     Phase 2: certificate auth, paging, retries
   publish.py                         Phase 2: Tasks list publisher + write-back outbox
@@ -106,8 +107,8 @@ src/schedule_guard/                  [M0]
   report/app.py, report/templates/   read-only HTML report
   demo.py                            loads fake data for screenshots
 scripts/make_fixture.py              [M1] deterministic fixture generator
-tests/fixtures/                      [M1] generated MSPDI + update files (fake data only; `riverbend-clinic.xml` so far)
-tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py`, `test_fixture.py`, `test_mspdi_parse.py`, `test_store_triggers.py`, `test_import.py`, `test_baselines.py`, `test_clock.py`, `test_guard_rules.py`, `test_progress.py`, `conftest.py`, `properties/` so far)
+tests/fixtures/                      [M1] generated MSPDI + update files (fake data only; `riverbend-clinic.xml`, `updates/week-44.jsonl` so far)
+tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py`, `test_fixture.py`, `test_mspdi_parse.py`, `test_store_triggers.py`, `test_import.py`, `test_baselines.py`, `test_clock.py`, `test_guard_rules.py`, `test_progress.py`, `test_sources.py`, `test_sync.py`, `test_review.py`, `conftest.py`, `properties/` so far)
 deploy/systemd/                      user .service + .timer (Phase 2)
 docs/tenant-setup.md                 Phase 2 runbook for the tenant admin
 docs/spike-graph-selected.md         Phase 2 spike results

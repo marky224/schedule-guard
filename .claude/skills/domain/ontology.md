@@ -1,9 +1,9 @@
 # Domain ontology: schedule-guard
 
-Status: current for `project`, `task`, `baseline`, `baseline_task` and
-`task_progress` (`src/schedule_guard/store/schema.sql`, M2–M3) and for the
-guard's outcomes (`src/schedule_guard/guard.py`, M3); the other entities are
-still planned (PLAN.md §3–5)
+Status: current for every Phase 1 table (`src/schedule_guard/store/schema.sql`,
+M2–M4), the guard's outcomes (`src/schedule_guard/guard.py`, M3) and sync
+(`src/schedule_guard/sync.py`, M4); the Phase 2 tables are still planned
+(PLAN.md §3–5)
 Last verified: 2026-10-30
 Executable source of truth: src/ schemas. If this page disagrees with code, code wins.
 
@@ -42,10 +42,11 @@ Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 
 ## Entities (tables, PLAN.md §4)
 - In the schema: `project`, `task` (master schedule), `baseline`, `baseline_task`,
-  `task_progress` (progress fields + task version, from 0 at import)
-- Planned:
-  - `source_update`, `outcome`, `conflict`
-  - `sync_run`, `run_item`, `source_cursor`, `writeback` (Phase 2 outbox)
+  `task_progress` (progress fields + task version, from 0 at import),
+  `source_update` (one per idempotency key), `outcome` (one per key:
+  applied or conflict; a duplicate writes none), `conflict`, `sync_run`,
+  `run_item` (what a run captured)
+- Planned (Phase 2): `source_cursor`, `writeback` (outbox)
 
 ## Relations
 - Project —has→ Task (1..n)

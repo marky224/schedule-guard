@@ -1,7 +1,7 @@
 # Spec: 001 offline core (PLAN.md milestones M1–M6)
 
 Status: derived from the approved PLAN.md (approved 2026-10-23); M1 done
-2026-10-29, M2 and M3 done 2026-10-30, M4–M6 not started.
+2026-10-29, M2, M3 and M4 done 2026-10-30, M5–M6 not started.
 Source plan: [PLAN.md](../../PLAN.md) §1–8, §11. Terms: `.claude/skills/domain/`.
 
 ## Problem
@@ -107,6 +107,20 @@ or any baseline.
   a new run with `rerun_of`. `conflicts dismiss <id> --note` is the only
   review action: dismiss only, and the field resubmits against the current
   version (Q5).
+
+  Every command takes `--db <path>`; `sync now|daily` also takes `--source
+  file:<path>`. The file source checks each line's idempotency key itself
+  (`source_item_id` 1 to 200 letters, digits and `. _ : -`, unique across
+  the files one database reads; `item_version` an integer from 0) and hands
+  the decoded object to the guard untouched. A line that isn't UTF-8,
+  isn't strict JSON (no NaN, no key twice) or has no usable key is stored
+  under `unkeyed/` plus the SHA-256 of its bytes and becomes one
+  `malformed` conflict; reading the same bytes again is a duplicate. A run
+  first captures every line (a key given twice in one run counts once, the
+  rest as duplicates), then processes the captured items; an interrupted
+  run stays `running` and a failed one records its error, and `rerun`
+  finishes either. A missing or oversize (over 20 MB) update file fails the
+  run before anything is captured.
 - **US5 Report (M5).** `report` serves GET-only HTML on 127.0.0.1: summary,
   planned vs actual with baseline variance, overdue (planned finish < today
   and % complete < 100, today injectable), milestones, conflicts, runs.
