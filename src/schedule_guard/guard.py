@@ -9,9 +9,10 @@ The checks run in this order; the first one that fails decides:
 - G0 `duplicate`: the key already has an outcome.
 - G1 `malformed`: the payload isn't an object with an integer `task_uid` and
   `made_against_version`, a non-empty `fields` object, a `submitted_by`
-  name (no control character at all, tab and line breaks included, and no
-  "[" or "]", so it can't end its own entry or start another) and a
-  `submitted_at` date-time with a UTC offset.
+  name of at most MAX_SUBMITTER_CHARS characters (no control character at
+  all, tab and line breaks included, and no "[" or "]", so it can't end
+  its own entry or start another) and a `submitted_at` date-time with a
+  UTC offset.
 - G2 `unknown_task`: the project has no task with that UID.
 - G3 `field_not_allowed`: a field outside the five progress fields.
 - G4 `stale_version`: made against a version that isn't the task's current one.
@@ -20,8 +21,10 @@ The checks run in this order; the first one that fails decides:
   (2026-07-16T08:00:00) or later than today in America/Chicago (Q6);
   `remaining_work` not a number of hours from 0 to MAX_REMAINING_HOURS;
   `notes` not text an MSPDI file can hold, or with a control character
-  other than tab, LF and CR (so no DEL and no C1 control). Null is no
-  value: an update can't clear a field.
+  other than tab, LF and CR (so no DEL and no C1 control), or over
+  MAX_NOTE_CHARS characters, or taking the task's notes, its new entry
+  included, past MAX_TASK_NOTES_CHARS. Null is no value: an update can't
+  clear a field.
 - G6 `inconsistent_actuals`, after merging with the current values:
   `actual_finish` before `actual_start`, or 100 % complete without an
   `actual_finish` (Q6).
@@ -46,6 +49,9 @@ from schedule_guard.clock import SITE_TIMEZONE, Clock, today
 
 PROGRESS_FIELDS = ("percent_complete", "actual_start", "actual_finish", "remaining_work", "notes")
 MAX_REMAINING_HOURS = 1_000_000  # about 114 years of work; anything above is a mistake
+MAX_SUBMITTER_CHARS = 100  # submitted_by
+MAX_NOTE_CHARS = 4_000  # one update's note
+MAX_TASK_NOTES_CHARS = 100_000  # a task's notes once a note is appended, entry headings included
 
 _DATETIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}")
 # A character XML 1.0 can't hold, so text with one couldn't go back into an MSPDI file.
@@ -136,6 +142,12 @@ def decide(update: Update, task: TaskState | None, *, already_decided: bool, clo
     if invalid:  # G5
         return conflict("invalid_value", invalid)
     after = _merge(current, fields, f"{payload.submitted_on.isoformat()}, {update.source}, {payload.submitted_by}")
+    if "notes" in fields and len(after.notes) > MAX_TASK_NOTES_CHARS:  # G5, on the notes as appended
+        return conflict(
+            "invalid_value",
+            f"the note would take the task's notes to {len(after.notes):,} characters;"
+            f" they hold at most {MAX_TASK_NOTES_CHARS:,}",
+        )
     inconsistent = _inconsistent(after)
     if inconsistent:  # G6
         return conflict("inconsistent_actuals", inconsistent)
@@ -164,6 +176,8 @@ def _parse(payload: object) -> _Payload | str:
         or _NOT_XML.search(by)
     ):
         return f"submitted_by is not a name: {_show(by)}"
+    if len(by) > MAX_SUBMITTER_CHARS:
+        return f"submitted_by is {len(by):,} characters; a name is at most {MAX_SUBMITTER_CHARS}: {_show(by)}"
     submitted_on = _site_date(payload.get("submitted_at"))
     if submitted_on is None:
         return f"submitted_at is not a date-time with a UTC offset: {_show(payload.get('submitted_at'))}"
@@ -190,6 +204,8 @@ def _invalid_value(fields: Mapping[str, object], today: date) -> str | None:
                 return f"remaining_work is not a number of hours from 0 to {MAX_REMAINING_HOURS}: {_show(value)}"
         elif not isinstance(value, str) or _NOTE_CONTROL.search(value) or _NOT_XML.search(value):
             return f"notes is not text an MSPDI file can hold: {_show(value)}"
+        elif len(value) > MAX_NOTE_CHARS:  # notes, now known to be text
+            return f"notes is {len(value):,} characters; one note is at most {MAX_NOTE_CHARS:,}"
     return None
 
 

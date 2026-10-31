@@ -6,7 +6,10 @@ from datetime import UTC, datetime
 import pytest
 
 from schedule_guard.clock import fixed_clock
-from schedule_guard.guard import MAX_REMAINING_HOURS, Outcome, Progress, TaskState, Update, decide, target_uid
+from schedule_guard.guard import (
+    MAX_NOTE_CHARS, MAX_REMAINING_HOURS, MAX_SUBMITTER_CHARS, MAX_TASK_NOTES_CHARS, Outcome, Progress, TaskState, Update,
+    decide, target_uid,
+)
 
 NOON = fixed_clock(datetime(2026, 10, 30, 17, 0, tzinfo=UTC))  # 12:00 in Chicago on 2026-10-30
 LEAF = TaskState(
@@ -83,6 +86,7 @@ MALFORMED = {
     "submitter-open-bracket": payload(submitted_by="Crew [A"),
     "submitter-close-bracket": payload(submitted_by="Crew A]"),
     "submitter-forged-entry": payload(submitted_by="Crew A] forged\n[2026-10-01, file, Owner"),
+    "submitter-too-long": payload(submitted_by="C" * (MAX_SUBMITTER_CHARS + 1)),
     "no-submitted-at": {k: v for k, v in payload().items() if k != "submitted_at"},
     "submitted-at-words": payload(submitted_at="yesterday"),
     "submitted-at-naive": payload(submitted_at="2026-10-30T09:15:00"),
@@ -98,6 +102,14 @@ def test_g1_a_malformed_payload_is_a_conflict(item):
 
 def test_g1_detail_says_what_is_missing():
     assert run(payload(task_uid="12")).detail == "task_uid is not an integer: '12'"
+
+
+def test_g1_a_name_of_up_to_100_characters_is_a_name():
+    assert MAX_SUBMITTER_CHARS == 100
+    assert run(payload(submitted_by="C" * 100)).status == "applied"
+    outcome = run(payload(submitted_by="C" * 101))
+    assert outcome.reason == "malformed"
+    assert outcome.detail.startswith("submitted_by is 101 characters; a name is at most 100: 'CCC")
 
 
 # G2
@@ -180,6 +192,7 @@ INVALID = {
     "notes-noncharacter-fffe": {"notes": "a" + chr(0xFFFE)},
     "notes-noncharacter-ffff": {"notes": "a" + chr(0xFFFF)},
     "notes-vertical-tab": {"notes": "a\x0bb"},
+    "notes-too-long": {"notes": "n" * (MAX_NOTE_CHARS + 1)},
 }
 
 
@@ -196,6 +209,29 @@ def test_g5_a_value_of_the_wrong_type_or_out_of_range_is_a_conflict(fields):
 def test_g5_notes_take_any_xml_character_and_keep_their_line_breaks(text):
     # The ends of the ranges XML 1.0 allows, and the three control characters notes may hold.
     assert run(payload(fields={"notes": text})).after.notes == f"Pump truck booked\n[2026-10-30, file, Crew lead A] {text}"
+
+
+def test_g5_one_note_is_at_most_4000_characters():
+    assert MAX_NOTE_CHARS == 4_000
+    assert run(payload(fields={"notes": "n" * 4_000})).status == "applied"
+    assert run(payload(fields={"notes": "n" * 4_001})).detail == "notes is 4,001 characters; one note is at most 4,000"
+
+
+def test_g5_a_note_may_take_the_tasks_notes_to_100000_characters_and_no_further():
+    assert MAX_TASK_NOTES_CHARS == 100_000
+    entry = "\n[2026-10-30, file, Crew lead A] note"
+    full = TaskState(12, False, Progress(version=3, notes="n" * (100_000 - len(entry))))
+    assert len(run(payload(fields={"notes": "note"}), full).after.notes) == 100_000
+    outcome = run(payload(fields={"notes": "notes"}), full)
+    assert (outcome.status, outcome.reason, outcome.detail) == (
+        "conflict", "invalid_value", "the note would take the task's notes to 100,001 characters; they hold at most 100,000"
+    )
+
+
+def test_g5_a_task_whose_notes_are_already_past_the_cap_takes_updates_without_a_note():
+    imported = TaskState(12, False, Progress(version=3, notes="n" * 200_000))  # as a file may import them
+    assert run(payload(fields={"percent_complete": 60}), imported).status == "applied"
+    assert conflict_reason(payload(fields={"notes": "x"}), imported) == "invalid_value"
 
 
 def test_g5_today_is_the_chicago_date_not_the_utc_one():
@@ -294,6 +330,9 @@ def test_g7_progress_on_a_summary_task_is_a_conflict():
                      id="g4-before-g5"),
         pytest.param(payload(fields={"percent_complete": 100, "remaining_work": -1}), LEAF, "invalid_value",
                      id="g5-before-g6"),
+        pytest.param(payload(fields={"percent_complete": 100, "notes": "x"}),
+                     TaskState(12, False, Progress(version=3, notes="n" * MAX_TASK_NOTES_CHARS)), "invalid_value",
+                     id="g5-notes-cap-before-g6"),
         pytest.param(payload(task_uid=2, made_against_version=0, fields={"percent_complete": 100}), SUMMARY,
                      "inconsistent_actuals", id="g6-before-g7"),
         pytest.param(payload(task_uid=2, made_against_version=0, fields={"percent_complete": -1}), SUMMARY,
