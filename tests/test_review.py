@@ -62,8 +62,9 @@ def test_dismiss_marks_it_dismissed_with_the_note_and_applies_nothing(conflicted
     [
         (1, None, "needs --note"), (1, "   ", "needs --note"), (2, "x", "there is no conflict 2"),
         (0, "x", "there is no conflict 0"), (2**63, "x", "there is no conflict"),
+        (1, "ok \udcff", "the note must be UTF-8 text"),  # the argument a shell passes for b"ok \xff"
     ],
-    ids=["no-note", "blank-note", "unknown", "zero", "too-big-for-sqlite"],
+    ids=["no-note", "blank-note", "unknown", "zero", "too-big-for-sqlite", "note-not-utf-8"],
 )
 def test_dismiss_refuses_without_a_note_or_an_open_conflict(conflicted, conflict_id, note, message):
     with closing(open_db(conflicted)) as conn:

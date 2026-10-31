@@ -47,6 +47,10 @@ def dismiss(conn: sqlite3.Connection, conflict_id: int, note: str | None, *, now
     """Mark an open conflict dismissed, with the reviewer's note. The update stays unapplied."""
     if not note or not note.strip():
         raise ReviewRefused('dismissing a conflict needs --note "..."')
+    try:
+        note.encode("utf-8")  # SQLite stores text as UTF-8
+    except UnicodeEncodeError:  # an argument that isn't UTF-8 decodes to lone surrogates
+        raise ReviewRefused("the note must be UTF-8 text") from None
     if not 1 <= conflict_id <= _MAX_SQLITE_INTEGER:
         raise ReviewRefused(f"there is no conflict {conflict_id}")
     with transaction(conn):

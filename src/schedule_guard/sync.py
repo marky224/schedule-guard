@@ -44,7 +44,7 @@ _EARLIEST = datetime.min.replace(tzinfo=UTC)  # where an item without a usable s
 
 
 class SyncRefused(Exception):
-    """The run didn't start: another run holds the lock, there is no project, or nothing to rerun."""
+    """The run didn't start: the lock is taken, there is no project, the source isn't text, or nothing to rerun."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,6 +67,10 @@ def sync(db_path: str | Path, source: SourceAdapter, *, trigger: str = "now", cl
     """Read the source and decide every item it gives that has no outcome yet."""
     if trigger not in ("now", "daily"):
         raise ValueError(f"a sync run is triggered now or daily, not {trigger!r}")
+    try:
+        source.spec.encode("utf-8")  # a run records it, and SQLite stores text as UTF-8
+    except UnicodeEncodeError:  # a file name that isn't UTF-8 decodes to lone surrogates
+        raise SyncRefused(f"the source must be UTF-8 text, not {source.spec!r}") from None
 
     def capture(conn: sqlite3.Connection, run_id: str) -> None:
         items = source.read()

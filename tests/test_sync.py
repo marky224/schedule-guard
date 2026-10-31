@@ -4,6 +4,8 @@ import fcntl
 import json
 import os
 import shutil
+import subprocess
+import sys
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
@@ -157,7 +159,9 @@ LONE_SURROGATE = {
 
 
 @pytest.mark.parametrize("change", LONE_SURROGATE.values(), ids=LONE_SURROGATE.keys())
-def test_a_line_with_a_lone_surrogate_is_malformed_and_every_other_line_is_decided(fixture_db, tmp_path, change):
+def test_a_line_with_a_lone_surrogate_is_malformed_and_every_other_line_is_decided(
+    fixture_db, tmp_path, change
+):
     # json.dumps writes each lone surrogate as an escape, such as \ud800.
     bad = {**json.loads(line("u-bad", task_uid=4)), **change}
     source = write(tmp_path, line("u-001"), json.dumps(bad), line("u-002", task_uid=5))
@@ -273,6 +277,15 @@ def test_a_source_that_cant_be_read_fails_the_run_and_captures_nothing(fixture_d
         assert conn.execute("SELECT count(*) FROM source_update").fetchone() == (0,)
 
 
+def test_a_source_whose_name_is_not_utf_8_is_refused_before_the_run_starts(fixture_db, tmp_path):
+    path = tmp_path / os.fsdecode(b"upd-\xff.jsonl")  # as a shell passes the name: a lone surrogate
+    path.write_text(line("u-001") + "\n")
+    with pytest.raises(SyncRefused, match=r"the source must be UTF-8 text, not 'file:.*/upd-\\udcff\.jsonl'"):
+        sync(fixture_db, FileSource(path), clock=CLOCK)
+    with closing(open_db(fixture_db)) as conn:
+        assert conn.execute("SELECT count(*) FROM sync_run").fetchone() == (0,)
+
+
 def test_sync_needs_an_imported_project(tmp_path):
     empty = tmp_path / "empty.db"
     open_db(empty, create=True).close()
@@ -374,7 +387,34 @@ def test_cli_rerun_of_a_run_that_captured_nothing_is_refused(fixture_db, tmp_pat
     assert cli.main(["sync", "now", "--db", db, "--source", f"file:{tmp_path / 'missing.jsonl'}"]) == 1
     run_id = capsys.readouterr().out.split()[1]
     assert cli.main(["rerun", run_id, "--db", db]) == 1
-    assert capsys.readouterr() == ("", f"schedule-guard: error: run {run_id} captured nothing, so there is nothing to rerun\n")
+    error = f"schedule-guard: error: run {run_id} captured nothing, so there is nothing to rerun\n"
+    assert capsys.readouterr() == ("", error)
+
+
+@pytest.mark.parametrize(
+    ("command", "message"),
+    [("sync", b"the source must be UTF-8 text"), ("dismiss", b"the note must be UTF-8 text")],
+)
+def test_cli_refuses_a_source_or_a_note_that_is_not_utf_8_with_one_error_line(
+    fixture_db, tmp_path, command, message
+):
+    sync(fixture_db, write(tmp_path, line("u-001", task_uid=1)), clock=CLOCK)  # conflict 1: a summary task
+    db = os.fsencode(fixture_db)
+    if command == "sync":
+        name = os.fsencode(tmp_path) + b"/upd-\xff.jsonl"
+        shutil.copyfile(tmp_path / "updates.jsonl", name)
+        args = [b"sync", b"now", b"--db", db, b"--source", b"file:" + name]
+    else:
+        args = [b"conflicts", b"dismiss", b"1", b"--db", db, b"--note", b"ok \xff"]
+    # A new process, given the bytes as a shell would pass them.
+    result = subprocess.run([sys.executable, "-m", "schedule_guard.cli", *args], capture_output=True, check=False)
+    assert (result.returncode, result.stdout) == (1, b"")
+    assert result.stderr.startswith(b"schedule-guard: error: " + message) and result.stderr.count(b"\n") == 1, (
+        result.stderr
+    )
+    with closing(open_db(fixture_db)) as conn:
+        assert conn.execute("SELECT count(*) FROM sync_run").fetchone() == (1,)  # no run recorded
+        assert conn.execute("SELECT status FROM conflict").fetchall() == [("open",)]
 
 
 def test_cli_runs_list_with_no_runs(fixture_db, capsys):
