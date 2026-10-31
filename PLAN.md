@@ -124,7 +124,7 @@ CLI (Phase 1):
 | `schedule-guard rebaseline --db <path> --confirm --reason "..."` | Admin only. Appends a new baseline number built from the current planned values, and locks it. Old baselines never change (Q7). Refuses past baseline number 10 (Project's Baseline + Baseline1–10: **UNVERIFIED**, [L14] gives no range; checked in M7). |
 | `schedule-guard sync now --db <path> --source file:<path>` | Runs a sync immediately. Records a run with an id. |
 | `schedule-guard sync daily --db <path> --source file:<path>` | Same as `sync now`, labelled `daily`. The timer calls this one. |
-| `schedule-guard rerun --db <path> <run-id>` | Reprocesses the source items that run captured. Keys already decided count as duplicates. Records a new run with `rerun_of`. |
+| `schedule-guard rerun --db <path> <run-id>` | Reprocesses the source items that run captured. Keys already decided count as duplicates. Records a new run with `rerun_of`. Refuses a run that captured nothing. |
 | `schedule-guard runs list --db <path>` / `conflicts list --db <path> [--all]` / `conflicts dismiss --db <path> <id> --note "..."` | Inspect runs and conflicts. Dismiss a conflict with a note; it is never applied. |
 | `schedule-guard report [--port 8000]` | Serves the read-only HTML report on 127.0.0.1. |
 | `schedule-guard demo [--db <path>]` | Builds a fresh demo DB from the fixture and scripted updates (some applied, some conflicts), then serves the report. |
@@ -222,8 +222,10 @@ conflict(id PK, update_id UNIQUE, reason_code, detail,
 
 sync_run(id TEXT PK,                         -- UUID4
          trigger, rerun_of NULL, source, started_at, finished_at,
-         status CHECK(status IN ('running','ok','failed')),
+         status CHECK(status IN ('running','ok','failed','interrupted')),
          seen, applied, conflicts, duplicates, error)
+    interrupted: left running by a killed run, marked by the next run to
+    start (it holds the lock, so no other run is alive)
 run_item(run_id, update_id, PRIMARY KEY(run_id, update_id))  -- what a run captured
 source_cursor(source PK, cursor)             -- Phase 2: deltaLink
 writeback(update_id PK, target, payload_json, attempts, done_at,
@@ -272,11 +274,11 @@ with writing the outcome.
 | # | Check | Outcome / reason code |
 | --- | --- | --- |
 | G0 | The idempotency key already has an outcome. | `duplicate` (no write, not a conflict) |
-| G1 | The payload is malformed: missing task id or version, wrong types, unknown encoding. | conflict `malformed` |
+| G1 | The payload is malformed: missing task id or version, wrong types, unknown encoding, a submitter name over 100 characters. | conflict `malformed` |
 | G2 | The task UID doesn't exist in the project. | conflict `unknown_task` |
 | G3 | Any field is outside the allowlist, e.g. `planned_finish`, `name`, a baseline field, or an unknown column. | conflict `field_not_allowed` (all fields of the update listed) |
 | G4 | `made_against_version` ≠ the task's current version. | conflict `stale_version` |
-| G5 | A value is out of range or the wrong type: % complete outside 0–100, unparseable date, negative remaining work, or an actual start/finish later than today (Q6; "today" is an injectable clock). | conflict `invalid_value` |
+| G5 | A value is out of range or the wrong type: % complete outside 0–100, unparseable date, negative remaining work, or an actual start/finish later than today (Q6; "today" is an injectable clock). A note over 4,000 characters, or one that would take the task's notes past 100,000 characters once appended. | conflict `invalid_value` |
 | G6 | After merging with current values: `actual_finish` is before `actual_start`, or % complete is 100 without an `actual_finish` (Q6). | conflict `inconsistent_actuals` |
 | G7 | The target is a summary task. Project rolls summary tasks up from their subtasks (Q4). | conflict `summary_task` |
 | G8 | Phase 2 only: the same `source_item_id` was already decided at a different item version, so a user edited the row in place. | conflict `edited_after_submit` |
@@ -298,7 +300,13 @@ Rules that hold no matter which check fires:
 - Each item is processed in its own transaction. If a run crashes halfway,
   rerunning it finishes the items that have no outcome yet. Concurrent runs
   (timer plus a manual `sync now`) are blocked by an `fcntl` lock file next to
-  the DB. The OS releases the lock if the process dies.
+  the DB. The OS releases the lock if the process dies. A run that crashed
+  stays `running` until the next run starts, which marks it `interrupted`.
+  A rerun of a run that captured nothing is refused.
+- No line stops a run. A line the source can't decode as strict JSON (no
+  NaN or Infinity, no key twice, no lone-surrogate escape in any string) or
+  key is one `malformed` conflict, keyed by its bytes, and the other lines
+  are decided as usual.
 
 ## 6. Import, MSPDI safety and the fixture
 
@@ -387,6 +395,12 @@ Plus:
 
 - A `RuleBasedStateMachine` that interleaves submit, sync, rerun, dismiss
   conflict and lock baseline, and checks P1–P5 as invariants after every step.
+  A lock may change only `baseline.locked_at` and `locked_by`, and no
+  `baseline_task` row.
+- A property that puts arbitrary lines between valid ones: lone-surrogate
+  escapes, nesting at the decoder's limit, huge numbers, bytes that aren't
+  UTF-8. Every run ends ok, every line gets an outcome and every valid line
+  applies.
 - **The oracle has teeth.** A test monkeypatches a deliberately broken applier
   that writes `planned_finish` or a baseline field. It asserts P1 or P2
   *fails*, and that the DB trigger raises. This shows the properties can

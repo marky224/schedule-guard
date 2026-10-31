@@ -83,9 +83,10 @@ or any baseline.
   whether the idempotency key already has an outcome (G0) and stores the
   result. An update's payload is an object with integer `task_uid` and
   `made_against_version`, a non-empty `fields` object, a `submitted_by`
-  name (no control character at all, tab and line breaks included, and no
-  `[` or `]`, so a name can't end its own notes entry or start another)
-  and a `submitted_at` date-time with a UTC offset; anything else,
+  name of at most 100 characters (no control character at all, tab and
+  line breaks included, and no `[` or `]`, so a name can't end its own
+  notes entry or start another) and a `submitted_at` date-time with a UTC
+  offset; anything else,
   including an item its source couldn't decode, is `malformed`. Values:
   `percent_complete` an integer from 0 to 100; `actual_start` and
   `actual_finish` MSPDI date-times (`2026-07-16T08:00:00`, local, no
@@ -93,7 +94,10 @@ or any baseline.
   duration (`PT12H30M0S`); `notes` text an MSPDI file can hold: only
   characters XML 1.0 allows (no lone surrogates, no U+FFFE or U+FFFF) and
   no control character besides tab, LF and CR (so no DEL and no C1
-  control). A note's own line breaks stay as typed. Null is no value, so
+  control), at most 4,000 characters, and short enough that the task's
+  notes, the new entry and its heading included, stay within 100,000
+  characters (characters as code points). A note's own line breaks stay
+  as typed. Null is no value, so
   an update can't clear a field. G6 checks the merged state, so a task at
   100 % complete with no actual finish (as a file may import it) refuses
   every update that leaves it that way, a notes-only one too; the same
@@ -113,14 +117,21 @@ or any baseline.
   (`source_item_id` 1 to 200 letters, digits and `. _ : -`, unique across
   the files one database reads; `item_version` an integer from 0) and hands
   the decoded object to the guard untouched. A line that isn't UTF-8,
-  isn't strict JSON (no NaN, no key twice) or has no usable key is stored
-  under `unkeyed/` plus the SHA-256 of its bytes and becomes one
-  `malformed` conflict; reading the same bytes again is a duplicate. A run
-  first captures every line (a key given twice in one run counts once, the
-  rest as duplicates), then processes the captured items; an interrupted
-  run stays `running` and a failed one records its error, and `rerun`
-  finishes either. A missing or oversize (over 20 MB) update file fails the
-  run before anything is captured.
+  isn't strict JSON (no NaN, no key twice, no lone-surrogate escape such
+  as `\ud800` in any string or key) or has no usable key is stored under
+  `unkeyed/` plus the SHA-256 of its bytes and becomes one `malformed`
+  conflict; reading the same bytes again is a duplicate. No line stops a
+  run, and the lines around it are still decided. A run first captures
+  every line (a key given twice in one run counts once, the rest as
+  duplicates), then processes the captured items. A failed run records
+  its error. A killed run is left `running` until the next run starts:
+  that run holds the lock, so it knows no other run is alive and marks
+  the killed one `interrupted`. `rerun` finishes a failed or interrupted
+  run, and refuses, with one error line and exit 1, a run that captured
+  nothing. A missing or oversize (over 20 MB) update file fails the run
+  before anything is captured, so there is nothing to rerun. An
+  update-file name or a `--note` that isn't UTF-8 is refused the same way,
+  before anything is recorded.
 - **US5 Report (M5).** `report` serves GET-only HTML on 127.0.0.1: summary,
   planned vs actual with baseline variance, overdue (planned finish < today
   and % complete < 100, today injectable), milestones, conflicts, runs.
@@ -151,7 +162,11 @@ or any baseline.
   the second is `stale_version`.
 - The same line read on every run of the file source: `duplicate`, no effect.
 - Crash mid-run: items without an outcome are processed by `rerun`; the final
-  state equals an uninterrupted run.
+  state equals an uninterrupted run. The next run to start marks the
+  crashed run `interrupted`.
+- A line with a lone-surrogate escape in `submitted_by`, `submitted_at`, a
+  field value or a key: one `malformed` conflict keyed by its bytes; the
+  other lines of the file are decided as usual.
 - A conflict is never applied by `rerun` (its key returns `duplicate`).
 - Direct SQL UPDATE or DELETE on `task` or `baseline_task`, DELETE of the
   `project` row, or any UPDATE of it other than the one-time set of
@@ -223,8 +238,12 @@ or any baseline.
   (all or nothing), P5 (stale never applies) pass; with a deliberately
   broken applier, P1 or P2 fails and the trigger raises.
 - M4: P3 (idempotent) and P6 (rerun equivalence, crash then rerun) pass; the
-  `RuleBasedStateMachine` keeps P1–P5 after every step; a concurrent second
-  run is refused.
+  `RuleBasedStateMachine` keeps P1–P5 after every step, and its baseline
+  lock changes only `baseline.locked_at` and `locked_by`, no
+  `baseline_task` row; a concurrent second run is refused; a property puts
+  arbitrary lines (lone surrogates, nesting at the decoder's limit, huge
+  numbers, bytes that aren't UTF-8) between valid ones, and every run ends
+  ok with every line decided.
 - M5: POST/PUT/DELETE return 405; a `<script>` task name is escaped; overdue
   is correct for a fixed today; `demo` serves a page with every section
   populated.

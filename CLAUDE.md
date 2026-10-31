@@ -38,8 +38,9 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 - tests/ — oracles (smoke, fixture, MSPDI parser, store trigger, import,
   baseline, clock, guard rule, applier, source, sync and review tests;
   `conftest.py` shared fixtures and the Hypothesis profile)
-- tests/properties/ — Hypothesis P1–P6 on the sync engine, the state
-  machine and the teeth test (`harness.py` writes the update files)
+- tests/properties/ — Hypothesis P1–P6 on the sync engine, a property that
+  no line stops a run, the state machine and the teeth test (`harness.py`
+  writes the update files)
 - tests/fixtures/ — generated, fictional inputs (`riverbend-clinic.xml`,
   `updates/week-44.jsonl`)
 - scripts/ — `make_fixture.py`, the seeded fixture generator

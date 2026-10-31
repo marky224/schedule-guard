@@ -4,7 +4,7 @@ Status: current for every Phase 1 table (`src/schedule_guard/store/schema.sql`,
 M2–M4), the guard's outcomes (`src/schedule_guard/guard.py`, M3) and sync
 (`src/schedule_guard/sync.py`, M4); the Phase 2 tables are still planned
 (PLAN.md §3–5)
-Last verified: 2026-10-30
+Last verified: 2026-10-31
 Executable source of truth: src/ schemas. If this page disagrees with code, code wins.
 
 ## Terms (use only these)
@@ -36,7 +36,7 @@ Executable source of truth: src/ schemas. If this page disagrees with code, code
 - **Sync run**: one execution of sync, with an id, trigger, counts, status
   and error.
 - **Rerun**: a sync run that reprocesses the source items another run
-  captured.
+  captured; refused for a run that captured nothing.
 
 Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 
@@ -64,6 +64,12 @@ Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 - `applied`: progress fields written, task version + 1, before/after stored.
 - `conflict`: nothing written to progress; a Conflict record is created.
 - `duplicate`: the key already had an outcome; no effect, not a conflict.
+
+## Sync run status
+- `running` → `ok` or `failed` (with its error), when the run ends.
+- `running` → `interrupted`, when the run was killed: the next run to start
+  holds the lock, so it knows no other run is alive and marks it. `rerun`
+  finishes a failed or interrupted run.
 
 ## Conflict status
 - `open` → `dismissed` (by a reviewer, with a note). No other transition.
@@ -111,9 +117,15 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
   field.
 - Progress on summary tasks is rejected (`summary_task`).
 - `notes` is appended as dated entries; existing text is never replaced.
-  The submitter's name holds no control character and no `[` or `]`; the
-  note holds only XML 1.0 characters and no control character besides tab,
-  LF and CR, and keeps its own line breaks as typed.
+  The submitter's name holds at most 100 characters, no control character
+  and no `[` or `]`; the note holds at most 4,000 characters, only XML 1.0
+  characters and no control character besides tab, LF and CR, and keeps
+  its own line breaks as typed. A task's notes reach at most 100,000
+  characters by appending; an update whose note would pass that is
+  `invalid_value`.
+- No line of an update file stops a sync run. One that isn't strict JSON
+  (no NaN, no key twice, no lone-surrogate escape) or has no usable key is
+  one `malformed` conflict, keyed by its bytes.
 - Re-baseline appends and locks the new baseline; old baselines never
   change. It refuses past baseline number 10 (UNVERIFIED, checked in M7).
 - Imported baselines stay unlocked until `baseline lock`. A baseline is
