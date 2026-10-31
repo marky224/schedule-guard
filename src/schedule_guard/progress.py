@@ -34,18 +34,19 @@ def load_task(conn: sqlite3.Connection, uid: int) -> TaskState | None:
     return TaskState(uid=uid, is_summary=bool(is_summary), progress=Progress(*progress))
 
 
-def apply_progress(conn: sqlite3.Connection, outcome: Outcome) -> None:
+def apply_progress(conn: sqlite3.Connection, outcome: Outcome, *, update_id: int | None = None) -> None:
     """Write an applied outcome's progress, if the task is still at the version it was made against.
 
     The guard already checked the version (G4); checking it again in the
-    write keeps a stale update from ever being applied.
+    write keeps a stale update from ever being applied. `update_id` is the
+    source_update row, recorded as the task's last_update_id.
     """
     after = outcome.after
     cursor = conn.execute(
         "UPDATE task_progress SET version = ?, percent_complete = ?, actual_start = ?, actual_finish = ?,"
-        " remaining_work = ?, notes = ? WHERE project_id = ? AND task_uid = ? AND version = ?",
+        " remaining_work = ?, notes = ?, last_update_id = ? WHERE project_id = ? AND task_uid = ? AND version = ?",
         (after.version, after.percent_complete, after.actual_start, after.actual_finish, after.remaining_work,
-         after.notes, PROJECT_ID, outcome.task_uid, outcome.made_against_version),
+         after.notes, update_id, PROJECT_ID, outcome.task_uid, outcome.made_against_version),
     )
     if cursor.rowcount != 1:
         raise ProgressError(f"task UID {outcome.task_uid} is no longer at version {outcome.made_against_version}")

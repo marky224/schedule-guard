@@ -224,6 +224,7 @@ __marimo__/
 *.db-wal
 *.db-shm
 *.db-journal
+*.db.lock
 *.pem
 *.pfx
 *.p12

@@ -66,7 +66,8 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
   real people's or company names, emails, secrets, certificates or keys.
 - Fixture and demo data are generated and fictional only.
 - Tenant settings and secrets live in a gitignored `.env`; key files live
-  outside the repo. `*.db` (and its `-wal`, `-shm`, `-journal` files),
+  outside the repo. `*.db` (and its `-wal`, `-shm`, `-journal` and `.lock`
+  files),
   `*.pem`, `*.pfx`, `*.p12`, `*.key`, `*.cer`, `*.crt`, `*.der` are
   gitignored.
 - Use role names in docs: the tenant admin, the scheduler, the reviewer, the

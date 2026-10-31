@@ -1,4 +1,4 @@
--- schedule-guard SQLite schema, version 2 (PLAN.md section 4).
+-- schedule-guard SQLite schema, version 3 (PLAN.md section 4).
 --
 -- project, task, baseline and baseline_task hold the imported file, the
 -- master schedule and the baselines. On any connection that leaves triggers
@@ -25,7 +25,8 @@
 -- constraint or a CREATE UNIQUE INDEX to them.
 --
 -- task_progress is not protected: it holds the progress fields and the
--- task version, which import seeds and an applied update changes.
+-- task version, which import seeds and an applied update changes. Nor are
+-- the sync tables at the end, which record what sync read and decided.
 
 CREATE TABLE project (
     id                 INTEGER NOT NULL PRIMARY KEY,
@@ -164,4 +165,65 @@ CREATE TABLE task_progress (
     notes            TEXT,
     last_update_id   INTEGER,                   -- the update applied last (M4); NULL as imported
     PRIMARY KEY (project_id, task_uid)
+);
+
+-- Sync (M4). Each item a source gives is stored once per idempotency key
+-- (source, source_item_id, item_version); a run records what it captured
+-- in run_item, and each key gets one outcome. A duplicate is no write.
+CREATE TABLE source_update (
+    id                   INTEGER PRIMARY KEY,
+    source               TEXT NOT NULL,         -- the source's name, such as file
+    source_item_id       TEXT NOT NULL,
+    item_version         TEXT NOT NULL,
+    task_uid             INTEGER,               -- these five are copies from the payload, NULL if absent or
+    made_against_version INTEGER,               -- of the wrong type, kept for the report; the guard reads
+    fields_json          TEXT,                  -- raw_json
+    submitted_at         TEXT,
+    submitted_by         TEXT,
+    raw_json             TEXT NOT NULL,         -- the item as its source gave it
+    problem              TEXT,                  -- why it can't be decided (not JSON, no usable key), or NULL
+    first_seen_run_id    TEXT NOT NULL,
+    UNIQUE (source, source_item_id, item_version)
+);
+
+CREATE TABLE outcome (
+    update_id   INTEGER PRIMARY KEY,            -- source_update.id: one outcome per idempotency key
+    status      TEXT NOT NULL CHECK (status IN ('applied', 'conflict')),
+    reason_code TEXT,
+    detail      TEXT,
+    run_id      TEXT NOT NULL,
+    decided_at  TEXT NOT NULL,
+    before_json TEXT,                           -- an applied update's task progress, before and after
+    after_json  TEXT
+);
+
+CREATE TABLE conflict (
+    id          INTEGER PRIMARY KEY,
+    update_id   INTEGER NOT NULL UNIQUE,
+    reason_code TEXT NOT NULL,
+    detail      TEXT,
+    status      TEXT NOT NULL CHECK (status IN ('open', 'dismissed')),
+    reviewed_at TEXT,
+    note        TEXT                            -- the reviewer's note on dismissing it
+);
+
+CREATE TABLE sync_run (
+    id          TEXT PRIMARY KEY,               -- UUID4
+    trigger     TEXT NOT NULL CHECK (trigger IN ('now', 'daily', 'rerun')),
+    rerun_of    TEXT,
+    source      TEXT NOT NULL,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    status      TEXT NOT NULL CHECK (status IN ('running', 'ok', 'failed')),
+    seen        INTEGER NOT NULL DEFAULT 0,
+    applied     INTEGER NOT NULL DEFAULT 0,
+    conflicts   INTEGER NOT NULL DEFAULT 0,
+    duplicates  INTEGER NOT NULL DEFAULT 0,
+    error       TEXT
+);
+
+CREATE TABLE run_item (                         -- what a run captured, so rerun can process it again
+    run_id    TEXT NOT NULL,
+    update_id INTEGER NOT NULL,
+    PRIMARY KEY (run_id, update_id)
 );

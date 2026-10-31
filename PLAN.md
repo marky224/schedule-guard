@@ -208,10 +208,13 @@ task_progress(project_id, task_uid, version INTEGER NOT NULL,
 
 source_update(id PK, source, source_item_id, item_version, task_uid,
               made_against_version, fields_json, submitted_at, submitted_by,
-              raw_json, first_seen_run_id,
+              raw_json, problem NULL, first_seen_run_id,
               UNIQUE(source, source_item_id, item_version))
+    problem: why the item can't be decided (not JSON, no usable key), so a
+    rerun records the same malformed conflict without the source file
 outcome(update_id PK -> source_update, status, reason_code, detail,
         run_id, decided_at, before_json, after_json)
+    status applied or conflict; a duplicate writes no outcome
 conflict(id PK, update_id UNIQUE, reason_code, detail,
          status CHECK(status IN ('open','dismissed')), reviewed_at, note)
 

@@ -389,6 +389,34 @@ def test_open_db_refuses_a_version_1_database_from_before_task_progress(tmp_path
         open_db(path)
 
 
+def test_open_db_refuses_a_version_2_database_from_before_sync(tmp_path):
+    path = tmp_path / "m3.db"
+    with closing(sqlite3.connect(path)) as conn:
+        conn.execute("CREATE TABLE task_progress (task_uid)")
+        conn.execute("PRAGMA user_version = 2")
+    with pytest.raises(StoreError, match=f"schema version 2; this schedule-guard uses {SCHEMA_VERSION}"):
+        open_db(path)
+
+
+def test_the_sync_tables_have_the_planned_columns(tmp_path):
+    with closing(open_db(tmp_path / "new.db", create=True)) as conn:
+        columns = {
+            table: [name for _, name, *_ in conn.execute(f"PRAGMA table_info({table})")]
+            for table in ("source_update", "outcome", "conflict", "sync_run", "run_item")
+        }
+        unique = [row for row in conn.execute("PRAGMA index_list(source_update)") if row[2] and row[3] == "u"]
+    assert columns == {
+        "source_update": ["id", "source", "source_item_id", "item_version", "task_uid", "made_against_version",
+                          "fields_json", "submitted_at", "submitted_by", "raw_json", "problem", "first_seen_run_id"],
+        "outcome": ["update_id", "status", "reason_code", "detail", "run_id", "decided_at", "before_json", "after_json"],
+        "conflict": ["id", "update_id", "reason_code", "detail", "status", "reviewed_at", "note"],
+        "sync_run": ["id", "trigger", "rerun_of", "source", "started_at", "finished_at", "status", "seen", "applied",
+                     "conflicts", "duplicates", "error"],
+        "run_item": ["run_id", "update_id"],
+    }
+    assert len(unique) == 1  # one source_update per idempotency key
+
+
 def test_task_progress_has_one_writable_row_per_task(tmp_path):
     path = tmp_path / "new.db"
     with closing(open_db(path, create=True)) as conn:
