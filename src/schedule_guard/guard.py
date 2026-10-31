@@ -9,7 +9,9 @@ The checks run in this order; the first one that fails decides:
 - G0 `duplicate`: the key already has an outcome.
 - G1 `malformed`: the payload isn't an object with an integer `task_uid` and
   `made_against_version`, a non-empty `fields` object, a `submitted_by`
-  text and a `submitted_at` date-time with a UTC offset.
+  name (no control character at all, tab and line breaks included, and no
+  "[" or "]", so it can't end its own entry or start another) and a
+  `submitted_at` date-time with a UTC offset.
 - G2 `unknown_task`: the project has no task with that UID.
 - G3 `field_not_allowed`: a field outside the five progress fields.
 - G4 `stale_version`: made against a version that isn't the task's current one.
@@ -17,8 +19,9 @@ The checks run in this order; the first one that fails decides:
   `actual_start` or `actual_finish` not an MSPDI date-time
   (2026-07-16T08:00:00) or later than today in America/Chicago (Q6);
   `remaining_work` not a number of hours from 0 to MAX_REMAINING_HOURS;
-  `notes` not text an MSPDI file can hold. Null is no value: an update
-  can't clear a field.
+  `notes` not text an MSPDI file can hold, or with a control character
+  other than tab, LF and CR (so no DEL and no C1 control). Null is no
+  value: an update can't clear a field.
 - G6 `inconsistent_actuals`, after merging with the current values:
   `actual_finish` before `actual_start`, or 100 % complete without an
   `actual_finish` (Q6).
@@ -46,7 +49,10 @@ MAX_REMAINING_HOURS = 1_000_000  # about 114 years of work; anything above is a 
 
 _DATETIME = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}")
 # A character XML 1.0 can't hold, so text with one couldn't go back into an MSPDI file.
-_NOT_XML = re.compile("[^\t\n\r\x20-퟿-�\U00010000-\U0010ffff]")
+_NOT_XML = re.compile(r"[^\t\n\r\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+# Unicode category Cc: the C0 controls, DEL and the C1 controls U+0080-U+009F.
+_CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+_NOTE_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f]")  # Cc but tab, LF and CR
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,7 +159,10 @@ def _parse(payload: object) -> _Payload | str:
     if not all(isinstance(name, str) for name in fields):
         return "fields has a name that is not text"
     by = payload.get("submitted_by")
-    if not isinstance(by, str) or not by.strip() or _NOT_XML.search(by):
+    if (
+        not isinstance(by, str) or not by.strip() or _CONTROL.search(by) or "[" in by or "]" in by
+        or _NOT_XML.search(by)
+    ):
         return f"submitted_by is not a name: {_show(by)}"
     submitted_on = _site_date(payload.get("submitted_at"))
     if submitted_on is None:
@@ -179,7 +188,7 @@ def _invalid_value(fields: Mapping[str, object], today: date) -> str | None:
         elif name == "remaining_work":
             if not (_is_number(value) and 0 <= value <= MAX_REMAINING_HOURS):
                 return f"remaining_work is not a number of hours from 0 to {MAX_REMAINING_HOURS}: {_show(value)}"
-        elif not isinstance(value, str) or _NOT_XML.search(value):
+        elif not isinstance(value, str) or _NOTE_CONTROL.search(value) or _NOT_XML.search(value):
             return f"notes is not text an MSPDI file can hold: {_show(value)}"
     return None
 
@@ -189,7 +198,7 @@ def _merge(current: Progress, fields: Mapping[str, object], note_prefix: str) ->
     if "remaining_work" in fields:
         values["remaining_work"] = _duration(fields["remaining_work"])
     if "notes" in fields:
-        entry = f"[{note_prefix}] {fields['notes']}"
+        entry = f"[{note_prefix}] {fields['notes']}"  # the note's own line breaks stay as typed
         values["notes"] = f"{current.notes}\n{entry}" if current.notes else entry  # appended, never replaced
     return replace(current, version=current.version + 1, **values)
 

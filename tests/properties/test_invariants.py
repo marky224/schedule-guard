@@ -6,6 +6,7 @@ unknown-task, forbidden-field, bad-value and malformed updates, mixed.
 """
 
 import re
+from collections import Counter
 from contextlib import closing
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -147,6 +148,19 @@ def test_p5_a_stale_update_never_applies(fresh_db, sequence):
     for step in steps:
         if step.outcome.status == "applied":
             assert step.update.payload["made_against_version"] == step.version_before
+
+
+def test_the_strategies_apply_a_fair_share_of_updates(fresh_db):
+    # P1, P2, P4 and P5 can only catch a bad write if updates get applied.
+    statuses = Counter()
+
+    @given(SEQUENCES)
+    def collect(sequence):
+        _, _, steps = run_on_a_fresh_copy(fresh_db, sequence)
+        statuses.update(step.outcome.status for step in steps)
+
+    collect()
+    assert statuses["applied"] >= 0.15 * sum(statuses.values()), statuses
 
 
 def update(source_item_id, made_against_version, fields) -> tuple:

@@ -9,7 +9,7 @@ Each task's progress values from the file go into task_progress at version
 0, the version the first update is made against. A
 database holds one project, so a second import is refused (Q14): a changed
 schedule goes into a fresh database. Imported baselines stay unlocked until
-`baseline lock` (Q24).
+`baseline lock`.
 """
 
 import hashlib

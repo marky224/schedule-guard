@@ -83,14 +83,21 @@ or any baseline.
   whether the idempotency key already has an outcome (G0) and stores the
   result. An update's payload is an object with integer `task_uid` and
   `made_against_version`, a non-empty `fields` object, a `submitted_by`
-  name and a `submitted_at` date-time with a UTC offset; anything else,
+  name (no control character at all, tab and line breaks included, and no
+  `[` or `]`, so a name can't end its own notes entry or start another)
+  and a `submitted_at` date-time with a UTC offset; anything else,
   including an item its source couldn't decode, is `malformed`. Values:
   `percent_complete` an integer from 0 to 100; `actual_start` and
   `actual_finish` MSPDI date-times (`2026-07-16T08:00:00`, local, no
   offset); `remaining_work` hours from 0 to 1,000,000, stored as an MSPDI
-  duration (`PT12H30M0S`); `notes` text an MSPDI file can hold (no control
-  characters besides tab, LF and CR, no lone surrogates). Null is no value,
-  so an update can't clear a field.
+  duration (`PT12H30M0S`); `notes` text an MSPDI file can hold: only
+  characters XML 1.0 allows (no lone surrogates, no U+FFFE or U+FFFF) and
+  no control character besides tab, LF and CR (so no DEL and no C1
+  control). A note's own line breaks stay as typed. Null is no value, so
+  an update can't clear a field. G6 checks the merged state, so a task at
+  100 % complete with no actual finish (as a file may import it) refuses
+  every update that leaves it that way, a notes-only one too; the same
+  update with an actual finish, or one that lowers % complete, applies.
 - **US4 Sync (M4).** `sync now` and `sync daily` read every item from the
   file source (JSON Lines) and process them in `(submitted_at,
   source_item_id)` order. Each item commits its outcome in its own
@@ -152,7 +159,7 @@ or any baseline.
   conflict on; the schema check fails if one is added.
 - Direct SQL INSERT of a `baseline_task` row unless its baseline exists
   with `locked_at` not set and its task exists: the trigger aborts.
-- Imported baselines stay unlocked until `baseline lock` (Q24). Until then
+- Imported baselines stay unlocked until `baseline lock`. Until then
   the schema still accepts a new row in one for a task it has no row for,
   though never a changed or deleted row; `baseline lock` ends that.
 - Direct SQL INSERT of a `task` row unless its project exists with

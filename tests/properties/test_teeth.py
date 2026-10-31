@@ -12,6 +12,7 @@ from contextlib import closing
 from datetime import UTC, datetime
 
 import pytest
+import test_invariants as invariants  # imported as a module, so its tests aren't collected twice
 from harness import assert_unchanged, baselines, master_schedule, progress_rows, run
 
 from schedule_guard import progress
@@ -67,3 +68,27 @@ def test_the_property_fails_on_a_broken_applier_with_triggers_off(fixture_db, mo
         assert step.outcome.status == "applied"
         with pytest.raises(AssertionError, match=f"{what}: a row changed"):
             assert_unchanged(before, read(conn), what)
+
+
+def open_db_with_triggers_off(path, **kwargs):
+    conn = open_db(path, **kwargs)
+    conn.setconfig(sqlite3.SQLITE_DBCONFIG_ENABLE_TRIGGER, False)
+    return conn
+
+
+PROPERTIES = {
+    "p2-planned-finish": (also_moves_the_planned_finish, invariants.test_p2_the_master_schedule_stays_byte_identical,
+                          "master schedule: a row changed"),
+    "p1-baseline-finish": (also_moves_the_baseline_finish, invariants.test_p1_the_baselines_stay_byte_identical,
+                           "baselines: a row changed"),
+}
+
+
+@pytest.mark.parametrize(("broken", "prop", "message"), PROPERTIES.values(), ids=PROPERTIES.keys())
+def test_the_property_test_itself_fails_on_a_broken_applier(fresh_db, monkeypatch, broken, prop, message):
+    # The P1 and P2 tests as they run in the suite, strategies and all; the
+    # triggers are off so the broken write reaches the database.
+    monkeypatch.setattr(progress, "apply_progress", broken)
+    monkeypatch.setattr(invariants, "open_db", open_db_with_triggers_off)
+    with pytest.raises(AssertionError, match=message):
+        prop(fresh_db=fresh_db)

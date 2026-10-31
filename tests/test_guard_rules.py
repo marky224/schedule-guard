@@ -74,6 +74,15 @@ MALFORMED = {
     "submitter-blank": payload(submitted_by="  "),
     "submitter-number": payload(submitted_by=7),
     "submitter-control": payload(submitted_by="Crew\x00lead"),
+    # No control character at all in a name, so it can't break or forge a notes entry.
+    "submitter-line-feed": payload(submitted_by="Crew\nlead"),
+    "submitter-carriage-return": payload(submitted_by="Crew\rlead"),
+    "submitter-tab": payload(submitted_by="Crew\tlead"),
+    "submitter-del": payload(submitted_by="Crew\x7flead"),
+    "submitter-c1-csi": payload(submitted_by="Crew\x9blead"),
+    "submitter-open-bracket": payload(submitted_by="Crew [A"),
+    "submitter-close-bracket": payload(submitted_by="Crew A]"),
+    "submitter-forged-entry": payload(submitted_by="Crew A] forged\n[2026-10-01, file, Owner"),
     "no-submitted-at": {k: v for k, v in payload().items() if k != "submitted_at"},
     "submitted-at-words": payload(submitted_at="yesterday"),
     "submitted-at-naive": payload(submitted_at="2026-10-30T09:15:00"),
@@ -166,12 +175,27 @@ INVALID = {
     "notes-nul": {"notes": "a\x00b"},
     "notes-escape": {"notes": "a\x1b[2Jb"},
     "notes-lone-surrogate": {"notes": "a\ud800b"},
+    "notes-del": {"notes": "x\x7fy"},
+    "notes-c1-csi": {"notes": "a\x9b2Jb"},
+    "notes-noncharacter-fffe": {"notes": "a" + chr(0xFFFE)},
+    "notes-noncharacter-ffff": {"notes": "a" + chr(0xFFFF)},
+    "notes-vertical-tab": {"notes": "a\x0bb"},
 }
 
 
 @pytest.mark.parametrize("fields", INVALID.values(), ids=INVALID.keys())
 def test_g5_a_value_of_the_wrong_type_or_out_of_range_is_a_conflict(fields):
     assert conflict_reason(payload(fields=fields)) == "invalid_value"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [chr(0xD7FF), chr(0xE000), chr(0xFFFD), chr(0x10000), chr(0x10FFFF), "tab\tthen", "line\nbreak", "cr\rlf"],
+    ids=["d7ff", "e000", "fffd", "10000", "10ffff", "tab", "line-feed", "carriage-return"],
+)
+def test_g5_notes_take_any_xml_character_and_keep_their_line_breaks(text):
+    # The ends of the ranges XML 1.0 allows, and the three control characters notes may hold.
+    assert run(payload(fields={"notes": text})).after.notes == f"Pump truck booked\n[2026-10-30, file, Crew lead A] {text}"
 
 
 def test_g5_today_is_the_chicago_date_not_the_utc_one():
@@ -229,6 +253,21 @@ def test_g6_inconsistent_actuals_after_the_merge_are_a_conflict(task, fields):
 )
 def test_g6_consistent_actuals_apply(fields):
     assert run(payload(fields=fields)).status == "applied"
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [{"notes": "Inspector on site"}, {"remaining_work": 4}, {"actual_start": "2026-07-16T08:00:00"}],
+    ids=["notes", "remaining-work", "actual-start"],
+)
+def test_g6_a_task_at_100_percent_without_a_finish_refuses_updates_that_leave_it_so(fields):
+    # G6 checks the merged state, so a task imported at 100 % with no actual
+    # finish refuses every update that leaves it that way, a notes-only one
+    # too; the same update with an actual finish applies.
+    complete = TaskState(12, False, Progress(version=0, percent_complete=100))
+    assert conflict_reason(payload(made_against_version=0, fields=fields), complete) == "inconsistent_actuals"
+    with_finish = {**fields, "actual_finish": "2026-10-29T17:00:00"}
+    assert run(payload(made_against_version=0, fields=with_finish), complete).status == "applied"
 
 
 # G7

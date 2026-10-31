@@ -105,9 +105,14 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
 - G5/G6 validation: % complete 0–100, remaining work 0 to 1,000,000 hours,
   valid dates, actual dates not later than today (injectable clock,
   America/Chicago), actual finish ≥ actual start, 100 % requires an actual
-  finish. An update can't clear a field.
+  finish (after merging, so a task at 100 % without one takes only an
+  update that supplies it or lowers % complete). An update can't clear a
+  field.
 - Progress on summary tasks is rejected (`summary_task`).
 - `notes` is appended as dated entries; existing text is never replaced.
+  The submitter's name holds no control character and no `[` or `]`; the
+  note holds only XML 1.0 characters and no control character besides tab,
+  LF and CR, and keeps its own line breaks as typed.
 - Re-baseline appends and locks the new baseline; old baselines never
   change. It refuses past baseline number 10 (UNVERIFIED, checked in M7).
 - Imported baselines stay unlocked until `baseline lock`. A baseline is

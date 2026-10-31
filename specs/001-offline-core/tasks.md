@@ -27,7 +27,7 @@ Format: `- [ ] T000 [P?] [USn] Description (path)`
 - [x] T033 [US3] Shared fixtures: temp DB from the fixture (`tests/conftest.py`)
 - [x] T034 [US3] Hypothesis P1, P2, P4, P5 (`tests/properties/test_invariants.py`)
 - [x] T035 [US3] Teeth test: broken applier makes P1/P2 fail; trigger raises (`tests/properties/test_teeth.py`)
-- [x] T036 [US3] `task_progress` table, seeded by import at version 0 (Q40) (`src/schedule_guard/store/schema.sql`, `src/schedule_guard/importer.py`)
+- [x] T036 [US3] `task_progress` table, seeded by import at version 0, the version a freshly imported task starts at (`src/schedule_guard/store/schema.sql`, `src/schedule_guard/importer.py`)
 - [x] T037 [US3] Applier: load a task's state, write an applied outcome only at its made-against version (`src/schedule_guard/progress.py`, `tests/test_progress.py`, `tests/properties/harness.py`)
 ### M4: sources and sync
 - [ ] T040 [US4] `SourceAdapter` protocol (`src/schedule_guard/sources/base.py`)
