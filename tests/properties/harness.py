@@ -145,14 +145,16 @@ def progress_rows(conn: sqlite3.Connection) -> dict:
     return {row[0]: row[1:] for row in conn.execute(f"SELECT {PROGRESS} FROM task_progress ORDER BY task_uid")}
 
 
-def baselines(conn: sqlite3.Connection) -> tuple[bytes, list]:
-    """P1: the baseline bytes plus the stored file, and every column of every baseline row."""
+def baselines(conn: sqlite3.Connection) -> tuple[bytes, dict[str, list]]:
+    """P1: the baseline bytes plus the stored file, and every column of every baseline and baseline_task row."""
     data = b"".join(xml for (xml,) in conn.execute(
         "SELECT xml_c14n FROM baseline_task ORDER BY project_id, number, task_uid"
     ))
     data += conn.execute("SELECT source_xml FROM project").fetchone()[0]
-    rows = conn.execute("SELECT * FROM baseline ORDER BY project_id, number").fetchall()
-    rows += conn.execute("SELECT * FROM baseline_task ORDER BY project_id, number, task_uid").fetchall()
+    rows = {
+        "baseline": conn.execute("SELECT * FROM baseline ORDER BY project_id, number").fetchall(),
+        "baseline_task": conn.execute("SELECT * FROM baseline_task ORDER BY project_id, number, task_uid").fetchall(),
+    }
     return data, rows
 
 
@@ -162,7 +164,7 @@ def master_schedule(conn: sqlite3.Connection) -> tuple[bytes, list]:
     return data, conn.execute("SELECT * FROM task ORDER BY project_id, uid").fetchall()
 
 
-def assert_unchanged(before: tuple[bytes, list], after: tuple[bytes, list], what: str) -> None:
+def assert_unchanged(before: tuple[bytes, list | dict], after: tuple[bytes, list | dict], what: str) -> None:
     assert hashlib.sha256(after[0]).hexdigest() == hashlib.sha256(before[0]).hexdigest(), f"{what}: bytes changed"
     assert after[0] == before[0], f"{what}: bytes changed"
     assert after[1] == before[1], f"{what}: a row changed"

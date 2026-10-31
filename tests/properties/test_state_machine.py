@@ -3,7 +3,8 @@
 P1, P2, P4 and P5 are checked after every step, and P3 after every sync: a
 second sync of the same file right after it decides nothing new. A rerun of
 a run that captured nothing is refused. A baseline lock is the one step
-that may change a baseline row, and only its lock columns, never the bytes.
+that may change a baseline row, and only its lock columns, locked_at and
+locked_by; it changes no baseline_task row and no bytes.
 """
 
 from contextlib import closing
@@ -83,9 +84,11 @@ class SyncMachine(RuleBasedStateMachine):
                 return
             lock_baseline(conn, 0, now=LATER)
             data, rows = baselines(conn)
-        assert data == self.baselines[0]  # the bytes never change
-        changed = [(old, new) for old, new in zip(self.baselines[1], rows, strict=True) if old != new]
-        assert [new[:2] + new[4:] for _, new in changed] == [old[:2] + old[4:] for old, _ in changed]
+        old_data, old_rows = self.baselines
+        assert data == old_data  # the bytes never change
+        assert rows["baseline_task"] == old_rows["baseline_task"]  # nor does any baseline_task row
+        # A baseline row keeps every column but locked_at and locked_by: project_id, number, reason, created_at.
+        assert [row[:2] + row[4:] for row in rows["baseline"]] == [row[:2] + row[4:] for row in old_rows["baseline"]]
         self.baselines = (data, rows)
 
     @invariant()
