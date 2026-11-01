@@ -228,6 +228,18 @@ def test_a_second_run_at_the_same_time_is_refused(fixture_db, tmp_path):
     assert sync(fixture_db, source, clock=CLOCK).applied == 1  # the lock is free again
 
 
+def test_a_run_through_a_symlink_shares_the_lock_of_the_real_path(fixture_db, tmp_path):
+    link = tmp_path / "link.db"
+    link.symlink_to(fixture_db)
+    source = write(tmp_path, line("u-001"))
+    with open(f"{fixture_db}.lock", "a") as held:  # a run on the real path holds its lock
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(SyncRefused, match=f"another sync run is in progress \\(it holds {fixture_db.name}.lock\\)"):
+            sync(link, source, clock=CLOCK)
+    assert not (tmp_path / "link.db.lock").exists()
+    assert sync(link, source, clock=CLOCK).applied == 1  # free again, through either name
+
+
 class Crash(BaseException):
     """Stands in for the process dying: not an Exception, so the run is left running."""
 

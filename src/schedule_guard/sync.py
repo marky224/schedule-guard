@@ -109,8 +109,13 @@ _RUN_COLUMNS = (
 
 @contextmanager
 def run_lock(db_path: str | Path) -> Iterator[None]:
-    """Hold the lock file next to the database for one run, or refuse if another run holds it."""
-    path = Path(db_path)
+    """Hold the lock file next to the database for one run, or refuse if another run holds it.
+
+    The lock file is named from the database's resolved path, so a --db
+    given through a symlink shares it with the real path. A hard link is a
+    name of its own for the same file, so it still gets its own lock file.
+    """
+    path = Path(db_path).resolve()
     lock = path.with_name(f"{path.name}.lock")
     fd = os.open(lock, os.O_RDWR | os.O_CREAT, 0o600)
     try:
