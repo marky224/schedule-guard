@@ -228,8 +228,10 @@ sync_run(id TEXT PK,                         -- UUID4
          status CHECK(status IN ('running','ok','failed','interrupted')),
          seen, applied, conflicts, duplicates, error)
     interrupted: left running by a killed run, marked by the next run to
-    start (it holds the lock, so no other run is alive; a run through a
-    hard link to the DB file has its own lock, see section 5)
+    start (it holds the lock, so no other run is alive). A live run can be
+    marked too, and then ends ok or failed, if the next run takes another
+    lock file: through a hard link to the DB file (section 5), or after the
+    lock file was deleted or the DB renamed while the live run held it
 run_item(run_id, update_id, PRIMARY KEY(run_id, update_id))  -- what a run captured
 source_cursor(source PK, cursor)             -- Phase 2: deltaLink
 writeback(update_id PK, target, payload_json, attempts, done_at,

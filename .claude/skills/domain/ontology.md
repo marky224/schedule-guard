@@ -72,10 +72,12 @@ Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 - `running` → `interrupted`, when the run was killed: the next run to start
   holds the lock, so it knows no other run is alive and marks it. `rerun`
   finishes a failed or interrupted run.
-- `interrupted` → `ok` or `failed`, only when two runs reach one database
-  through a hard link and its other name: the lock file is named from the
-  resolved path, which a symlink shares and a hard link doesn't, so a run
-  can mark a live one interrupted, and that run then ends as usual.
+- `interrupted` → `ok` or `failed`, when the run was alive after all: the
+  run that marked it took a different lock file. That happens when two runs
+  reach one database through a hard link and its other name (the lock file
+  is named from the resolved path, which a symlink shares and a hard link
+  doesn't), or when the lock file is deleted, or the database renamed,
+  while a run holds it. The live run then ends as usual.
 
 ## Conflict status
 - `open` → `dismissed` (by a reviewer, with a note). No other transition.
