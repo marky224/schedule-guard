@@ -2,11 +2,13 @@
 
 import argparse
 import sys
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 
 from schedule_guard import __version__
 from schedule_guard.baselines import BaselineRefused, lock_baseline, rebaseline
+from schedule_guard.demo import DEMO_CLOCK, DemoRefused, build_demo
 from schedule_guard.importer import ImportRefused, import_source, read_source
 from schedule_guard.mspdi.parse import MspdiError
 from schedule_guard.review import ReviewRefused, dismiss, list_conflicts
@@ -15,7 +17,7 @@ from schedule_guard.store.db import StoreError, open_db
 from schedule_guard.sync import RunResult, SyncRefused, list_runs, rerun, sync
 
 # A refusal prints one error line and exits 1; OSError covers a missing file.
-REFUSALS = (MspdiError, StoreError, ImportRefused, BaselineRefused, SyncRefused, ReviewRefused, OSError)
+REFUSALS = (MspdiError, StoreError, ImportRefused, BaselineRefused, SyncRefused, ReviewRefused, DemoRefused, OSError)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -85,6 +87,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--port", type=_port, default=8000, metavar="PORT", help="the port on 127.0.0.1 (default: 8000)"
     )
     report.set_defaults(run=_serve_report)
+
+    demo = commands.add_parser("demo", help="build a new demo database from the fixture and serve the report on it")
+    demo.add_argument(
+        "--db", type=Path, metavar="PATH",
+        help="where to build it; it must not exist (default: a temporary directory, removed on exit)",
+    )
+    demo.add_argument(
+        "--port", type=_port, default=8000, metavar="PORT", help="the port on 127.0.0.1 (default: 8000)"
+    )
+    demo.set_defaults(run=_demo)
     return parser
 
 
@@ -231,6 +243,24 @@ def _serve_report(args: argparse.Namespace) -> int:
     from schedule_guard.report.app import create_app, server  # FastAPI and uvicorn load only to serve
 
     server(create_app(args.db, clock=_now), args.port).run()
+    return 0
+
+
+def _demo(args: argparse.Namespace) -> int:
+    if args.db is not None:
+        return _build_and_serve_demo(args.db, args.port)
+    with tempfile.TemporaryDirectory(prefix="schedule-guard-demo-") as scratch:
+        return _build_and_serve_demo(Path(scratch) / "demo.db", args.port)
+
+
+def _build_and_serve_demo(db: Path, port: int) -> int:
+    from schedule_guard.report.app import create_app, server  # FastAPI and uvicorn load only to serve
+
+    runs = build_demo(db)
+    print(f"built the demo database {_printable(str(db))}; today is {DEMO_CLOCK().date()} for the demo")
+    for run in runs:
+        print(_run_line(run))
+    server(create_app(db, clock=DEMO_CLOCK), port).run()
     return 0
 
 
