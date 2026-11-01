@@ -5,7 +5,9 @@ when the item is written to the update file, as a crew that just read it
 would, or NEXT, one past it, as a stale copy would be. Each batch of items
 is written to the file just before a sync run, so CURRENT is the version
 the run starts from; earlier lines stay in the file and come back as
-duplicates, as they do for the file source.
+duplicates, as they do for the file source. A notes chain is made against
+CURRENT, NEXT and AFTER_NEXT in turn, as a crew that saw each of its own
+updates applied would.
 """
 
 import hashlib
@@ -31,7 +33,8 @@ CLOCK = fixed_clock(datetime(2026, 10, 30, 17, 0, tzinfo=UTC))
 # default settings, so the engine properties take fewer examples than the
 # profile's 40.
 ENGINE = settings(max_examples=15)
-CURRENT, NEXT = "<current version>", "<next version>"
+CURRENT, NEXT, AFTER_NEXT = "<current version>", "<next version>", "<two past the current version>"
+OFFSETS = {CURRENT: 0, NEXT: 1, AFTER_NEXT: 2}
 PROGRESS = "task_uid, version, percent_complete, actual_start, actual_finish, remaining_work, notes"
 LEAVES = [2, 3, 4, 5, 7, 8]  # a few tasks that aren't summaries, so their versions climb
 SUMMARIES = [0, 1, 6, 12]
@@ -100,7 +103,37 @@ def items(draw):
     return item
 
 
-BATCHES = st.lists(st.lists(items(), min_size=1, max_size=6), min_size=1, max_size=3)
+@st.composite
+def notes_chain(draw) -> list[dict]:
+    """Two or three notes updates to one task, each made against the version the one before leaves.
+
+    They are submitted after every other item's time, in order, so they
+    usually all apply and the task's notes get more than one entry in one
+    run: a guard that replaced the notes instead of appending can't pass.
+    """
+    uid, tag = draw(st.sampled_from(LEAVES)), draw(st.integers(0, 99))
+    chain = []
+    for step, made_against in enumerate([CURRENT, NEXT, AFTER_NEXT][: draw(st.integers(2, 3))]):
+        chain.append({
+            "source_item_id": f"n-{uid}-{tag}-{step}", "item_version": 0, "task_uid": uid,
+            "made_against_version": made_against, "fields": {"notes": draw(GOOD["notes"])},
+            "submitted_at": f"2026-10-30T1{step}:00:00-05:00",
+            "submitted_by": draw(st.sampled_from(["Crew lead A", "Crew lead B"])),
+        })
+    return chain
+
+
+@st.composite
+def batch(draw) -> list:
+    """The lines one sync run adds to the update file; now and then a notes chain among them."""
+    lines = draw(st.lists(items(), min_size=1, max_size=6))
+    if rarely(draw, 3):
+        at = draw(st.integers(0, len(lines)))
+        lines[at:at] = draw(notes_chain())
+    return lines
+
+
+BATCHES = st.lists(batch(), min_size=1, max_size=3)
 
 
 # Running
@@ -115,9 +148,9 @@ def render(item, current: dict[int, int]) -> str:
     if isinstance(item, str):
         return item
     made_against = item.get("made_against_version")
-    if made_against in (CURRENT, NEXT):
+    if made_against in OFFSETS:
         version = current.get(item.get("task_uid"), 0) if isinstance(item.get("task_uid"), int) else 0
-        item = {**item, "made_against_version": version + (made_against == NEXT)}
+        item = {**item, "made_against_version": version + OFFSETS[made_against]}
     return json.dumps(item)
 
 
@@ -201,7 +234,9 @@ def assert_all_or_nothing(conn: sqlite3.Connection, imported: dict) -> None:
             if name == "notes":
                 entry = after["notes_entry"]
                 assert (entry is None) == (name not in fields), entry
-                assert entry is None or (entry.startswith("[") and entry.endswith(f"] {fields[name]}")), entry
+                assert entry is None or (entry.startswith("[") and entry.endswith(f"] {fields[name]}")), (
+                    f"P4: notes_entry {entry!r} is not an entry for {fields[name]!r}"
+                )
             elif name not in fields:
                 assert after[name] == before[name], name
             elif name == "remaining_work":
@@ -218,7 +253,8 @@ def assert_all_or_nothing(conn: sqlite3.Connection, imported: dict) -> None:
             notes, entry = state["notes"], after["notes_entry"]
             state = {k: v for k, v in after.items() if k != "notes_entry"}
             state["notes"] = notes if entry is None else f"{notes}\n{entry}" if notes else entry  # appended
-        assert _as_progress(row) == state, uid  # and nothing else moved the task's progress, notes included
+        # and nothing else moved the task's progress, notes included
+        assert _as_progress(row) == state, f"P4: task {uid}'s progress isn't what its applied updates made it"
 
 
 def assert_stale_never_applied(conn: sqlite3.Connection) -> None:

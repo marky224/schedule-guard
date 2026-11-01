@@ -5,17 +5,22 @@ field. On a normal connection the DB trigger refuses it and the run fails.
 With triggers switched off on sync's connection, as someone who can write
 the file could, the write goes through, and P2 or P1 fails: the property
 tests themselves catch the very bug they guard against.
+
+A guard that replaces a task's notes with the new entry instead of
+appending it makes the P4 test itself fail.
 """
 
 import json
 import sqlite3
 from contextlib import closing
+from dataclasses import replace
 
 import pytest
 import test_invariants as invariants  # imported as a module, so its tests aren't collected twice
-from harness import CLOCK, assert_unchanged, baselines, master_schedule, progress_rows
+from harness import BATCHES, CLOCK, ENGINE, assert_unchanged, baselines, master_schedule, progress_rows
+from hypothesis import Phase, given, settings
 
-from schedule_guard import progress
+from schedule_guard import guard, progress
 from schedule_guard import sync as sync_module
 from schedule_guard.sources.file import FileSource
 from schedule_guard.store.db import open_db
@@ -26,6 +31,7 @@ VALID = json.dumps({
     "fields": {"percent_complete": 50}, "submitted_at": "2026-10-30T09:15:00-05:00", "submitted_by": "Crew lead A",
 })
 real_apply = progress.apply_progress
+real_merge = guard._merge
 
 
 def also_moves_the_planned_finish(conn, outcome, **kwargs):
@@ -98,3 +104,20 @@ def test_the_property_test_itself_fails_on_a_broken_applier(fresh_db, monkeypatc
     monkeypatch.setattr(sync_module, "open_db", open_db_with_triggers_off)
     with pytest.raises(AssertionError, match=message):
         prop(fresh_db=fresh_db)
+
+
+def merge_replacing_the_notes(current, fields, note_prefix):
+    merged = real_merge(current, fields, note_prefix)
+    return replace(merged, notes=f"[{note_prefix}] {fields['notes']}") if "notes" in fields else merged
+
+
+def test_p4_itself_fails_on_a_guard_that_replaces_the_notes(fresh_db, monkeypatch):
+    # The P4 test's own body and strategies, whose notes chains give a task
+    # more than one applied entry, so a replaced note can't pass for an
+    # appended one. Without shrinking, which would rerun the engine for
+    # every smaller example, and stopping at the first failure.
+    monkeypatch.setattr(guard, "_merge", merge_replacing_the_notes)
+    p4 = invariants.test_p4_each_update_has_one_outcome_and_changes_all_or_nothing.hypothesis.inner_test
+    first_failure = settings(ENGINE, phases=[Phase.generate], report_multiple_bugs=False)
+    with pytest.raises(AssertionError, match="P4: "):
+        first_failure(given(batches=BATCHES)(p4))(fresh_db=fresh_db)
