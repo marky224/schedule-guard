@@ -82,6 +82,10 @@ def sync(db_path: str | Path, source: SourceAdapter, *, trigger: str = "now", cl
 
 def rerun(db_path: str | Path, run_id: str, *, clock: Clock = system_clock) -> RunResult:
     """Process again the items run `run_id` captured, as a new run; refused if it captured none."""
+    try:
+        run_id.encode("utf-8")  # SQLite binds text as UTF-8
+    except UnicodeEncodeError:  # an argument that isn't UTF-8 decodes to lone surrogates
+        raise SyncRefused(f"the run id must be UTF-8 text, not {run_id!r}") from None
     with closing(open_db(db_path)) as conn:
         row = conn.execute("SELECT source FROM sync_run WHERE id = ?", (run_id,)).fetchone()
         captured = conn.execute("SELECT 1 FROM run_item WHERE run_id = ? LIMIT 1", (run_id,)).fetchone()

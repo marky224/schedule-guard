@@ -322,6 +322,13 @@ def test_a_rerun_of_a_run_that_captured_nothing_is_refused(fixture_db, tmp_path)
         assert conn.execute("SELECT count(*) FROM sync_run").fetchone() == (2,)  # no rerun was recorded
 
 
+def test_a_rerun_id_that_is_not_utf_8_is_refused(fixture_db):
+    with pytest.raises(SyncRefused, match=r"the run id must be UTF-8 text, not 'x\\udcff'"):
+        rerun(fixture_db, "x\udcff", clock=CLOCK)  # the argument a shell passes for b"x\xff"
+    with closing(open_db(fixture_db)) as conn:
+        assert conn.execute("SELECT count(*) FROM sync_run").fetchone() == (0,)
+
+
 def test_a_source_that_cant_be_read_fails_the_run_and_captures_nothing(fixture_db, tmp_path):
     result = sync(fixture_db, FileSource(tmp_path / "missing.jsonl"), clock=CLOCK)
     assert (result.status, result.seen) == ("failed", 0)
@@ -468,6 +475,14 @@ def test_cli_refuses_a_source_or_a_note_that_is_not_utf_8_with_one_error_line(
     with closing(open_db(fixture_db)) as conn:
         assert conn.execute("SELECT count(*) FROM sync_run").fetchone() == (1,)  # no run recorded
         assert conn.execute("SELECT status FROM conflict").fetchall() == [("open",)]
+
+
+def test_cli_rerun_refuses_a_run_id_that_is_not_utf_8_with_one_error_line(fixture_db):
+    args = [b"rerun", b"x\xff", b"--db", os.fsencode(fixture_db)]
+    result = subprocess.run([sys.executable, "-m", "schedule_guard.cli", *args], capture_output=True, check=False)
+    assert (result.returncode, result.stdout, result.stderr) == (
+        1, b"", b"schedule-guard: error: the run id must be UTF-8 text, not 'x\\udcff'\n"
+    )
 
 
 def test_cli_runs_list_with_no_runs(fixture_db, capsys):

@@ -1,3 +1,6 @@
+import os
+import subprocess
+import sys
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
@@ -77,6 +80,7 @@ def test_baseline_commands_need_an_imported_project(tmp_path, command):
         pytest.param(True, None, "needs --reason", id="no-reason"),
         pytest.param(True, "", "needs --reason", id="empty-reason"),
         pytest.param(True, " \t", "needs --reason", id="blank-reason"),
+        pytest.param(True, "new \udcff", "the reason must be UTF-8 text", id="reason-not-utf-8"),  # b"new \xff"
     ],
 )
 def test_rebaseline_refuses_without_confirm_and_reason(conn, confirm, reason, message):
@@ -161,6 +165,20 @@ def test_cli_baseline_lock_and_rebaseline(tmp_path, monkeypatch, capsys):
         assert conn.execute("SELECT number, locked_by FROM baseline ORDER BY number").fetchall() == [
             (0, "baseline lock"), (1, "rebaseline")
         ]
+
+
+def test_cli_rebaseline_refuses_a_reason_that_is_not_utf_8_with_one_error_line(tmp_path):
+    db = tmp_path / "project.db"
+    with closing(open_db(db, create=True)) as conn:
+        import_file(conn, FIXTURE, now=IMPORTED)
+    # A new process, given the bytes as a shell would pass them.
+    args = [b"rebaseline", b"--db", os.fsencode(db), b"--confirm", b"--reason", b"new \xff"]
+    result = subprocess.run([sys.executable, "-m", "schedule_guard.cli", *args], capture_output=True, check=False)
+    assert (result.returncode, result.stdout, result.stderr) == (
+        1, b"", b"schedule-guard: error: the reason must be UTF-8 text\n"
+    )
+    with closing(open_db(db)) as conn:
+        assert conn.execute("SELECT count(*) FROM baseline").fetchone() == (1,)  # Baseline 0 only
 
 
 def test_cli_baseline_lock_refuses_a_number_too_big_for_sqlite(tmp_path, monkeypatch, capsys):

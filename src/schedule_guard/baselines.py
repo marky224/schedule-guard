@@ -42,6 +42,10 @@ def rebaseline(conn: sqlite3.Connection, *, confirm: bool, reason: str | None, n
         raise BaselineRefused("rebaseline adds a baseline that can never be removed; pass --confirm")
     if not reason or not reason.strip():
         raise BaselineRefused('rebaseline needs --reason "..."')
+    try:
+        reason.encode("utf-8")  # SQLite stores text as UTF-8
+    except UnicodeEncodeError:  # an argument that isn't UTF-8 decodes to lone surrogates
+        raise BaselineRefused("the reason must be UTF-8 text") from None
     stamp = now.isoformat(timespec="seconds")
     with transaction(conn):
         project_id = _imported_project(conn)
