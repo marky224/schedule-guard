@@ -4,7 +4,7 @@
 <p>No project has been imported into this database.</p>
 {% else %}
 <table>
-  <tr><th>Project</th><td>{{ project.name }}</td></tr>
+  <tr><th>Project</th><td>{{ project.name or "(no name)" }}</td></tr>
   <tr><th>Imported</th><td>{{ imported.imported_at }}</td></tr>
   <tr><th>Source SHA-256</th><td>{{ imported.source_sha256 }}</td></tr>
   <tr><th>Tasks</th><td>{{ task_count }} ({{ summary_count }} summary tasks)</td></tr>

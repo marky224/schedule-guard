@@ -22,6 +22,7 @@ import pytest
 import uvicorn
 
 from schedule_guard import cli
+from schedule_guard.baselines import rebaseline
 from schedule_guard.clock import fixed_clock
 from schedule_guard.importer import import_file
 from schedule_guard.report.app import CSP, PAGES, create_app, server
@@ -200,24 +201,29 @@ def test_cli_report_refuses_a_port_outside_0_to_65535(tmp_path, capsys, port):
 # T052: what the report must never do, and overdue against a fixed today.
 
 
-def project_db(tmp_path, tasks: str, *, name: str = "Small project") -> Path:
-    """A database imported from a small MSPDI file with the given <Task> elements."""
+def project_db(tmp_path, tasks: str, *, name: str | None = "Small project") -> Path:
+    """A database imported from a small MSPDI file with the given <Task> elements (no <Name> for None)."""
     xml = tmp_path / "small.xml"
-    xml.write_text(
-        f'<Project xmlns="http://schemas.microsoft.com/project"><Name>{name}</Name><Tasks>{tasks}</Tasks></Project>'
-    )
+    named = "" if name is None else f"<Name>{name}</Name>"
+    xml.write_text(f'<Project xmlns="http://schemas.microsoft.com/project">{named}<Tasks>{tasks}</Tasks></Project>')
     db = tmp_path / "small.db"
     with closing(open_db(db, create=True)) as conn:
         import_file(conn, xml, now=IMPORTED)
     return db
 
 
-def task(uid: int, name: str, finish: str, percent: int = 0, actual_finish: str | None = None) -> str:
+def task(uid: int, name: str, finish: str, percent: int = 0, actual_finish: str | None = None, *,
+         summary: bool = False, baselines: dict[int, str] | None = None) -> str:
+    """A <Task>; `baselines` maps a Baseline number to its finish (each starts with the task)."""
     done = f"<ActualFinish>{actual_finish}</ActualFinish>" if actual_finish else ""
+    saved = "".join(
+        f"<Baseline><Number>{number}</Number><Start>2026-10-01T08:00:00</Start><Finish>{at}</Finish></Baseline>"
+        for number, at in (baselines or {}).items()
+    )
     return (
-        f"<Task><UID>{uid}</UID><Name>{name}</Name><Summary>0</Summary><Milestone>0</Milestone>"
+        f"<Task><UID>{uid}</UID><Name>{name}</Name><Summary>{int(summary)}</Summary><Milestone>0</Milestone>"
         f"<Start>2026-10-01T08:00:00</Start><Finish>{finish}</Finish><PercentComplete>{percent}</PercentComplete>"
-        f"{done}</Task>"
+        f"{done}{saved}</Task>"
     )
 
 
@@ -294,6 +300,56 @@ def test_overdue_is_due_before_today_in_chicago_and_not_complete(tmp_path):
     assert overdue(datetime(2026, 10, 31, 4, 59, tzinfo=UTC)) == ["1"]  # 23:59 on 2026-10-30 in Chicago
     assert overdue(datetime(2026, 10, 31, 5, 0, tzinfo=UTC)) == ["1", "3"]  # midnight: task 3 was due yesterday
     assert overdue(datetime(2026, 11, 9, 18, 0, tzinfo=UTC)) == ["1", "3", "4"]
+
+
+def variance(db: Path) -> list[tuple[str, str, str]]:
+    """The baseline /tasks names, and each task's baseline finish and finish variance."""
+    html = local(create_app(db, clock=CLOCK)).get("/tasks").text
+    (number,) = re.findall(r"minus baseline (\S+)'s", html)
+    return [(number, cells[6], cells[8]) for cells in rows(html) if cells]
+
+
+def test_variance_uses_the_newest_baseline_rebaseline_added_else_baseline_0(tmp_path):
+    # Baseline 0 is the one the file tracks; Baseline 3 is an older archive in a higher slot.
+    db = project_db(tmp_path, task(1, "Framing", "2026-10-10T17:00:00",
+                                   baselines={0: "2026-10-08T17:00:00", 3: "2026-10-05T17:00:00"}))
+    assert variance(db) == [("0", "2026-10-08T17:00:00", "+2 d")]  # not baseline 3's +5 d
+    with closing(open_db(db)) as conn:
+        assert rebaseline(conn, confirm=True, reason="Owner approved the new dates", now=IMPORTED) == 4
+    assert variance(db) == [("4", "2026-10-10T17:00:00", "0 d")]
+    with closing(open_db(db)) as conn:
+        assert rebaseline(conn, confirm=True, reason="Second change", now=IMPORTED) == 5
+    assert variance(db) == [("5", "2026-10-10T17:00:00", "0 d")]
+
+
+def test_variance_uses_no_baseline_when_only_a_higher_numbered_one_was_imported(tmp_path):
+    db = project_db(tmp_path, task(1, "Framing", "2026-10-10T17:00:00", baselines={3: "2026-10-05T17:00:00"}))
+    assert variance(db) == [("(none)", "", "")]
+    milestones = local(create_app(db, clock=CLOCK)).get("/milestones").text
+    assert "minus baseline (none)'s" in milestones
+
+
+def test_overdue_lists_leaf_tasks_only_and_tasks_keeps_the_summary_marked(tmp_path):
+    db = project_db(tmp_path, "".join([
+        task(1, "Phase one", "2026-10-29T17:00:00", 50, summary=True),
+        task(2, "Due yesterday, not started", "2026-10-29T17:00:00"),
+        task(3, "Due yesterday, done", "2026-10-29T17:00:00", 100, "2026-10-29T16:00:00"),
+    ]))
+    client = local(create_app(db, clock=CLOCK))
+    assert [cells[0] for cells in rows(client.get("/overdue").text) if cells] == ["2"]
+    assert row(client.get("/tasks").text, 1)[2] == "Phase one (summary)"
+    facts = dict(re.findall(r"<tr><th>(.*?)</th><td>(.*?)</td></tr>", client.get("/").text))
+    assert facts["Overdue"] == '<a href="/overdue">1</a>'  # the count matches the list
+
+
+def test_a_project_with_no_name_shows_no_name(tmp_path):
+    db = project_db(tmp_path, task(1, "Framing", "2026-10-10T17:00:00"), name=None)
+    client = local(create_app(db, clock=CLOCK))
+    for route in PAGES:
+        html = client.get(route).text
+        assert "Read-only report for (no name)." in html and "None" not in html, route
+    facts = dict(re.findall(r"<tr><th>(.*?)</th><td>(.*?)</td></tr>", client.get("/").text))
+    assert facts["Project"] == "(no name)"
 
 
 def test_the_report_binds_127_0_0_1_only(week_44, monkeypatch):

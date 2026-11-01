@@ -38,6 +38,9 @@ def test_the_demo_database_has_progress_overdue_tasks_reached_milestones_and_con
     overdue = [cells[0] for cells in rows(client.get("/overdue").text) if cells]
     assert {"19", "20", "21", "24", "25", "26", "27"} <= set(overdue)
     assert not {"3", "11", "29"} & set(overdue)  # done, a reached milestone, not due yet
+    with closing(open_db(db)) as conn:
+        summaries = {str(uid) for (uid,) in conn.execute("SELECT uid FROM task WHERE is_summary")}
+    assert summaries and not summaries & set(overdue)  # leaf tasks only
 
 
 @pytest.mark.parametrize("content", [b"", b"someone else's file"], ids=["empty", "not-empty"])

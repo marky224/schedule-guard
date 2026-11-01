@@ -1,8 +1,8 @@
 """The read-only HTML report (PLAN.md section 7).
 
 GET-only pages: the summary, tasks (planned against actual, with the
-variance from the latest baseline), overdue tasks, milestones, conflicts and
-runs. Each request opens the database with store.db.open_db_read_only
+variance from the newest baseline rebaseline added, else Baseline 0),
+overdue leaf tasks, milestones, conflicts and runs. Each request opens the database with store.db.open_db_read_only
 (mode=ro and query_only, so SQLite refuses any write) and reads one
 snapshot of it; this package runs no INSERT, UPDATE, DELETE or DDL and
 imports none of the commands that write.
@@ -124,8 +124,15 @@ _TASKS = (
 
 
 def _baseline(conn: sqlite3.Connection) -> int | None:
-    """The latest baseline's number: rebaseline appends the next number, so it is the current one."""
-    return conn.execute("SELECT max(number) FROM baseline").fetchone()[0]
+    """The baseline the variance uses: the newest one rebaseline added, else Baseline 0; None if neither exists.
+
+    An imported baseline with a higher number is never used: a file may keep
+    an archive in Baseline1-10 while Baseline 0 is the one it tracks.
+    """
+    return conn.execute(
+        "SELECT coalesce((SELECT max(number) FROM baseline WHERE locked_by = 'rebaseline'),"
+        " (SELECT number FROM baseline WHERE number = 0))"
+    ).fetchone()[0]
 
 
 def _read_tasks(conn: sqlite3.Connection, day: date) -> list[Task]:
@@ -150,7 +157,7 @@ def _summary(conn: sqlite3.Connection, day: date) -> dict:
         "imported": conn.execute("SELECT source_sha256, imported_at, import_finished_at FROM project").fetchone(),
         "task_count": len(tasks),
         "summary_count": sum(t.is_summary for t in tasks),
-        "overdue_count": sum(t.overdue for t in tasks),
+        "overdue_count": len(_overdue_tasks(tasks)),
         "milestone_count": len(milestones),
         "reached_count": sum(t.milestone_status == "reached" for t in milestones),
         "baselines": conn.execute(
@@ -171,7 +178,12 @@ def _tasks_page(conn: sqlite3.Connection, day: date) -> dict:
 
 
 def _overdue(conn: sqlite3.Connection, day: date) -> dict:
-    return {"tasks": [t for t in _read_tasks(conn, day) if t.overdue]}
+    return {"tasks": _overdue_tasks(_read_tasks(conn, day))}
+
+
+def _overdue_tasks(tasks: list[Task]) -> list[Task]:
+    """Overdue leaf tasks: a summary task's % complete stays as imported (G7), so it isn't listed."""
+    return [t for t in tasks if t.overdue and not t.is_summary]
 
 
 def _milestones(conn: sqlite3.Connection, day: date) -> dict:

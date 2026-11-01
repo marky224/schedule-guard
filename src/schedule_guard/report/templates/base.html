@@ -23,7 +23,7 @@
   <a href="/conflicts">Conflicts</a>
   <a href="/runs">Runs</a>
 </nav>
-<p class="muted">Read-only report{% if project %} for {{ project.name }}{% endif %}. Today is {{ today }} (America/Chicago).</p>
+<p class="muted">Read-only report{% if project %} for {{ project.name or "(no name)" }}{% endif %}. Today is {{ today }} (America/Chicago).</p>
 <h1>{{ title }}</h1>
 {% block content %}{% endblock %}
 </body>
