@@ -1,13 +1,17 @@
 """Command-line entry point: `schedule-guard`."""
 
 import argparse
+import signal
 import sys
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
 from schedule_guard import __version__
 from schedule_guard.baselines import BaselineRefused, lock_baseline, rebaseline
+from schedule_guard.clock import Clock
 from schedule_guard.demo import DEMO_CLOCK, DemoRefused, build_demo
 from schedule_guard.importer import ImportRefused, import_source, read_source
 from schedule_guard.mspdi.parse import MspdiError
@@ -91,7 +95,8 @@ def build_parser() -> argparse.ArgumentParser:
     demo = commands.add_parser("demo", help="build a new demo database from the fixture and serve the report on it")
     demo.add_argument(
         "--db", type=Path, metavar="PATH",
-        help="where to build it; it must not exist (default: a temporary directory, removed on exit)",
+        help="where to build it; it must not exist (default: a temporary directory, removed when the demo"
+        " stops on Ctrl+C, SIGTERM or SIGHUP; a SIGKILL leaves it)",
     )
     demo.add_argument(
         "--port", type=_port, default=8000, metavar="PORT", help="the port on 127.0.0.1 (default: 8000)"
@@ -240,27 +245,58 @@ def _conflicts_dismiss(args: argparse.Namespace) -> int:
 
 
 def _serve_report(args: argparse.Namespace) -> int:
-    from schedule_guard.report.app import create_app, server  # FastAPI and uvicorn load only to serve
-
-    server(create_app(args.db, clock=_now), args.port).run()
-    return 0
+    with _stoppable():
+        return _serve(args.db, _now, args.port)
 
 
 def _demo(args: argparse.Namespace) -> int:
-    if args.db is not None:
-        return _build_and_serve_demo(args.db, args.port)
-    with tempfile.TemporaryDirectory(prefix="schedule-guard-demo-") as scratch:
-        return _build_and_serve_demo(Path(scratch) / "demo.db", args.port)
+    with _stoppable():
+        if args.db is not None:
+            return _build_and_serve_demo(args.db, args.port)
+        with tempfile.TemporaryDirectory(prefix="schedule-guard-demo-") as scratch:
+            return _build_and_serve_demo(Path(scratch) / "demo.db", args.port)
 
 
 def _build_and_serve_demo(db: Path, port: int) -> int:
-    from schedule_guard.report.app import create_app, server  # FastAPI and uvicorn load only to serve
-
     runs = build_demo(db)
     print(f"built the demo database {_printable(str(db))}; today is {DEMO_CLOCK().date()} for the demo")
     for run in runs:
         print(_run_line(run))
-    server(create_app(db, clock=DEMO_CLOCK), port).run()
+    return _serve(db, DEMO_CLOCK, port)
+
+
+@contextmanager
+def _stoppable() -> Iterator[None]:
+    """Make SIGTERM and SIGHUP stop the command the way Ctrl+C does, so cleanup still runs.
+
+    uvicorn catches SIGINT and SIGTERM, shuts down, puts the old handlers
+    back and raises the signal again. SIGINT's default handler then raises
+    KeyboardInterrupt, which _serve catches; SIGTERM's would end the process
+    before any `finally` or `with` exit (the demo's temporary directory would
+    stay), so here it raises KeyboardInterrupt too. SIGHUP (the terminal
+    closed), which uvicorn doesn't catch, is raised again as SIGTERM, so the
+    server shuts down the same way. A SIGKILL can't be caught.
+    """
+    previous = {
+        signal.SIGTERM: signal.signal(signal.SIGTERM, signal.default_int_handler),
+        signal.SIGHUP: signal.signal(signal.SIGHUP, lambda signum, frame: signal.raise_signal(signal.SIGTERM)),
+    }
+    try:
+        yield
+    finally:
+        for signum, handler in previous.items():
+            signal.signal(signum, handler)
+
+
+def _serve(db: Path, clock: Clock, port: int) -> int:
+    """Serve the report on `db` on 127.0.0.1 until a stop signal, then return 0 with no traceback."""
+    from schedule_guard.report.app import create_app, server  # FastAPI and uvicorn load only to serve
+
+    app = create_app(db, clock=clock)
+    try:
+        server(app, port).run()
+    except KeyboardInterrupt:  # uvicorn has shut down and raised the stop signal again
+        pass
     return 0
 
 

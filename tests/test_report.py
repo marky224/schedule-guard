@@ -1,9 +1,18 @@
 """The read-only report: GET-only pages read from the database (PLAN.md section 7)."""
 
 import ast
+import functools
 import hashlib
+import http.client
 import json
+import os
 import re
+import selectors
+import shutil
+import signal
+import subprocess
+import sysconfig
+import time
 import warnings
 from contextlib import closing
 from datetime import UTC, datetime
@@ -303,3 +312,58 @@ def test_a_get_of_every_route_leaves_the_database_file_byte_identical(week_44):
     for route in PAGES:
         assert client.get(route).status_code == 200
     assert {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in week_44.parent.iterdir()} == files
+
+
+# Stopping: the installed command in a subprocess, stopped by a signal once it listens.
+
+STOP_SIGNALS = [signal.SIGINT, signal.SIGTERM, signal.SIGHUP]
+
+
+class Served:
+    """The installed schedule-guard with `args` and --port 0, once it listens and has served one GET of /.
+
+    The child starts with SIGINT at its default handler, as a terminal's Ctrl+C finds it, even when
+    the tests run with SIGINT ignored (a background job). Waiting reads the line uvicorn logs once
+    its socket listens, so nothing sleeps.
+    """
+
+    def __init__(self, *args: str, env: dict[str, str] | None = None):
+        script = shutil.which("schedule-guard", path=sysconfig.get_path("scripts"))
+        assert script, "schedule-guard console script is not installed"
+        self.process = subprocess.Popen(
+            [script, *args, "--port", "0"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
+            preexec_fn=functools.partial(signal.signal, signal.SIGINT, signal.SIG_DFL),
+        )
+        self.err = b""
+        deadline = time.monotonic() + 60
+        with selectors.DefaultSelector() as selector:
+            selector.register(self.process.stderr, selectors.EVENT_READ)
+            while not (found := re.search(rb"Uvicorn running on http://127\.0\.0\.1:(\d+)", self.err)):
+                chunk = os.read(self.process.stderr.fileno(), 65536) if selector.select(deadline - time.monotonic()) else b""
+                if not chunk:  # it ended, or never listened within the minute
+                    self.process.kill()
+                    pytest.fail(f"schedule-guard {' '.join(args)} never listened: {self.stop(signal.SIGKILL)}")
+                self.err += chunk
+        self.port = int(found[1])
+        connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=60)
+        connection.request("GET", "/")
+        assert connection.getresponse().status == 200
+        connection.close()
+
+    def stop(self, signum: int) -> tuple[int, str]:
+        """Send `signum`; return the exit code and all of stderr once it ends."""
+        if self.process.returncode is None:
+            self.process.send_signal(signum)
+        try:
+            _, err = self.process.communicate(timeout=60)
+        finally:
+            self.process.kill()
+        return self.process.returncode, (self.err + err).decode()
+
+
+@pytest.mark.parametrize("signum", STOP_SIGNALS, ids=lambda signum: signum.name)
+def test_cli_report_stops_on_ctrl_c_sigterm_or_sighup_with_exit_0_and_no_traceback(week_44, signum):
+    code, err = Served("report", "--db", str(week_44)).stop(signum)
+    assert code == 0, err
+    assert "Traceback" not in err and "KeyboardInterrupt" not in err, err
+    assert "Finished server process" in err  # uvicorn shut down on its own, not killed

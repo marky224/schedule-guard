@@ -1,12 +1,14 @@
 """demo: a new database from the fixture and demo-updates.jsonl, served as the report."""
 
 import json
+import os
+import tempfile
 from contextlib import closing
 from pathlib import Path
 
 import pytest
 import uvicorn
-from test_report import local, rows  # helpers only, so no test is collected twice
+from test_report import STOP_SIGNALS, Served, local, rows  # helpers only, so no test is collected twice
 
 from schedule_guard import cli
 from schedule_guard.demo import DEMO_CLOCK, FIXTURE, UPDATES, DemoRefused, build_demo
@@ -76,14 +78,29 @@ def test_cli_demo_builds_the_database_then_serves_the_report_on_127_0_0_1(tmp_pa
     assert page.status_code == 200 and "Today is 2026-10-30" in page.text and "Riverbend Clinic" in page.text
 
 
-def test_cli_demo_without_db_builds_in_a_temporary_directory_it_removes(monkeypatch):
+def test_cli_demo_without_db_builds_in_a_temporary_directory_it_removes(tmp_path, monkeypatch):
+    monkeypatch.setenv("TMPDIR", str(tmp_path))
+    monkeypatch.setattr(tempfile, "tempdir", None)  # so tempfile reads TMPDIR again
     built, there = [], []
     real = cli.build_demo
     monkeypatch.setattr(cli, "build_demo", lambda db: built.append(Path(db)) or real(db))
     monkeypatch.setattr(uvicorn.Server, "run", lambda self, sockets=None: there.append(built[0].exists()))
     assert cli.main(["demo"]) == 0
     assert there == [True]  # while the report was served
+    assert built[0].parent.parent == tmp_path
     assert not built[0].parent.exists()  # gone afterwards, directory and all
+
+
+@pytest.mark.parametrize("signum", STOP_SIGNALS, ids=lambda signum: signum.name)
+def test_cli_demo_without_db_stops_on_ctrl_c_sigterm_or_sighup_and_removes_its_directory(tmp_path, signum):
+    served = Served("demo", env={**os.environ, "TMPDIR": str(tmp_path)})
+    (scratch,) = tmp_path.iterdir()  # while the report is served
+    assert scratch.name.startswith("schedule-guard-demo-") and (scratch / "demo.db").is_file()
+    code, err = served.stop(signum)
+    assert code == 0, err
+    assert "Traceback" not in err and "KeyboardInterrupt" not in err, err
+    assert "Finished server process" in err
+    assert list(tmp_path.iterdir()) == []  # the directory is gone, demo.db and all
 
 
 def test_cli_demo_refuses_an_existing_database_with_one_error_line(tmp_path, monkeypatch, capsys):
