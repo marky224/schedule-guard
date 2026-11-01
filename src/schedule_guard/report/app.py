@@ -12,7 +12,9 @@ from update files (notes, submitter names, conflict details) and from the
 MSPDI file reaches HTML escaped. There is no JS and no form, and FastAPI's
 own docs pages are off, since they load scripts. The Content-Security-Policy
 header allows the page's inline style and nothing else. The report listens
-on 127.0.0.1 only.
+on 127.0.0.1 only and answers only a Host of 127.0.0.1 or localhost (any
+port), with 400 for any other, so a page whose own domain is pointed at
+127.0.0.1 (DNS rebinding) can't read the report as same-origin.
 """
 
 import sqlite3
@@ -26,11 +28,13 @@ import jinja2
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from schedule_guard.clock import Clock, system_clock, today
 from schedule_guard.store.db import open_db_read_only
 
 HOST = "127.0.0.1"  # the only address the report listens on
+ALLOWED_HOSTS = ["127.0.0.1", "localhost"]  # the only Host headers it answers, with any port
 TEMPLATES = jinja2.Environment(
     loader=jinja2.FileSystemLoader(Path(__file__).with_name("templates")),
     autoescape=True,
@@ -79,6 +83,7 @@ def create_app(db_path: str | Path, *, clock: Clock = system_clock) -> FastAPI:
     db_path = Path(db_path)
     open_db_read_only(db_path).close()
     app = FastAPI(title="schedule-guard report", docs_url=None, redoc_url=None, openapi_url=None)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=ALLOWED_HOSTS)
     readers = {"/": _summary, "/tasks": _tasks_page, "/overdue": _overdue, "/milestones": _milestones,
                "/conflicts": _conflicts, "/runs": _runs}
 

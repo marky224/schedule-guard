@@ -1,24 +1,18 @@
 """demo: a new database from the fixture and demo-updates.jsonl, served as the report."""
 
 import json
-import warnings
 from contextlib import closing
 from pathlib import Path
 
 import pytest
 import uvicorn
-from test_report import rows  # a helper only, so no test is collected twice
+from test_report import local, rows  # helpers only, so no test is collected twice
 
 from schedule_guard import cli
 from schedule_guard.demo import DEMO_CLOCK, FIXTURE, UPDATES, DemoRefused, build_demo
 from schedule_guard.mspdi.parse import parse_mspdi
 from schedule_guard.report.app import PAGES, create_app
 from schedule_guard.store.db import open_db
-
-with warnings.catch_warnings():
-    # Starlette now asks for httpx2; the lock has httpx, the dev dependency the plan names for TestClient.
-    warnings.filterwarnings("ignore", message="Using `httpx` with `starlette.testclient` is deprecated")
-    from fastapi.testclient import TestClient
 
 REASONS = ["field_not_allowed", "inconsistent_actuals", "invalid_value", "malformed", "stale_version", "summary_task",
            "unknown_task"]
@@ -36,7 +30,7 @@ def test_the_demo_database_has_progress_overdue_tasks_reached_milestones_and_con
             "SELECT t.uid FROM task t JOIN task_progress p ON p.task_uid = t.uid"
             " WHERE t.is_milestone AND p.percent_complete = 100 ORDER BY t.uid"
         ).fetchall() == [(2,), (11,)]
-    client = TestClient(create_app(db, clock=DEMO_CLOCK))
+    client = local(create_app(db, clock=DEMO_CLOCK))
     for route in PAGES:
         assert client.get(route).status_code == 200, route
     overdue = [cells[0] for cells in rows(client.get("/overdue").text) if cells]
@@ -78,7 +72,7 @@ def test_cli_demo_builds_the_database_then_serves_the_report_on_127_0_0_1(tmp_pa
     assert out[2].endswith(" daily ok: 29 seen, 0 applied, 0 conflicts, 29 duplicates")
     (server,) = served
     assert (server.config.host, server.config.port) == ("127.0.0.1", 8123)
-    page = TestClient(server.config.app).get("/")
+    page = local(server.config.app).get("/")
     assert page.status_code == 200 and "Today is 2026-10-30" in page.text and "Riverbend Clinic" in page.text
 
 

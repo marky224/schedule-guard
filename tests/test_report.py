@@ -41,9 +41,14 @@ def week_44(fixture_db):
     return fixture_db
 
 
+def local(app) -> TestClient:
+    """A client that sends Host 127.0.0.1:8000, as a browser on the host does."""
+    return TestClient(app, base_url="http://127.0.0.1:8000")
+
+
 @pytest.fixture
 def client(week_44):
-    return TestClient(create_app(week_44, clock=CLOCK))
+    return local(create_app(week_44, clock=CLOCK))
 
 
 def rows(html: str) -> list[list[str]]:
@@ -215,6 +220,25 @@ def test_every_route_answers_any_method_but_get_with_405(client, route, method):
     assert response.headers["allow"] == "GET"
 
 
+@pytest.mark.parametrize("host", ["attacker.example:8000", "attacker.example", "127.0.0.1.attacker.example:8000",
+                                  "localhost.attacker.example:8000"])
+@pytest.mark.parametrize("route", PAGES)
+def test_every_route_answers_a_foreign_host_with_400(week_44, route, host):
+    # A page whose own domain is pointed at 127.0.0.1 sends that domain as the Host (DNS rebinding).
+    response = TestClient(create_app(week_44, clock=CLOCK), base_url=f"http://{host}").get(route)
+    assert response.status_code == 400, (host, route)
+    assert response.text == "Invalid host header"
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1:8000", "localhost:8000", "127.0.0.1:51234", "localhost:51234"])
+def test_every_route_answers_127_0_0_1_and_localhost_on_any_port(week_44, host):
+    client = TestClient(create_app(week_44, clock=CLOCK), base_url=f"http://{host}")
+    for route in PAGES:
+        response = client.get(route)
+        assert response.status_code == 200, (host, route)
+        assert "Riverbend Clinic" in response.text
+
+
 SCRIPT = "<script>alert(1)</script>"
 
 
@@ -228,7 +252,7 @@ def test_text_from_the_files_is_escaped_on_every_page(tmp_path):
          "fields": {SCRIPT: 1}, "submitted_at": "2026-10-29T10:00:00-05:00", "submitted_by": f"{SCRIPT} (demo)"},
     ]))
     assert sync(db, FileSource(tmp_path / "updates.jsonl"), clock=CLOCK).applied == 1
-    client = TestClient(create_app(db, clock=CLOCK))
+    client = local(create_app(db, clock=CLOCK))
     pages = {route: client.get(route).text for route in PAGES}
     for route, html in pages.items():
         assert "<script" not in html.lower(), route
@@ -254,7 +278,7 @@ def test_overdue_is_due_before_today_in_chicago_and_not_complete(tmp_path):
     ]))
 
     def overdue(at: datetime) -> list[str]:
-        html = TestClient(create_app(db, clock=fixed_clock(at))).get("/overdue").text
+        html = local(create_app(db, clock=fixed_clock(at))).get("/overdue").text
         return [cells[0] for cells in rows(html) if cells]
 
     assert overdue(datetime(2026, 10, 30, 17, 0, tzinfo=UTC)) == ["1"]  # 12:00 on 2026-10-30 in Chicago
@@ -275,7 +299,7 @@ def test_the_report_binds_127_0_0_1_only(week_44, monkeypatch):
 
 def test_a_get_of_every_route_leaves_the_database_file_byte_identical(week_44):
     files = {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in week_44.parent.iterdir()}
-    client = TestClient(create_app(week_44, clock=CLOCK))
+    client = local(create_app(week_44, clock=CLOCK))
     for route in PAGES:
         assert client.get(route).status_code == 200
     assert {path: hashlib.sha256(path.read_bytes()).hexdigest() for path in week_44.parent.iterdir()} == files
