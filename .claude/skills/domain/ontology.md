@@ -4,7 +4,7 @@ Status: current for every Phase 1 table (`src/schedule_guard/store/schema.sql`,
 M2–M4), the guard's outcomes (`src/schedule_guard/guard.py`, M3) and sync
 (`src/schedule_guard/sync.py`, M4); the Phase 2 tables are still planned
 (PLAN.md §3–5)
-Last verified: 2026-10-31
+Last verified: 2026-11-01
 Executable source of truth: src/ schemas. If this page disagrees with code, code wins.
 
 ## Terms (use only these)
@@ -61,7 +61,9 @@ Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 - Rerun —rerun_of→ Sync run
 
 ## Outcome set
-- `applied`: progress fields written, task version + 1, before/after stored.
+- `applied`: progress fields written, task version + 1, before/after stored
+  (the version and the other four fields, without the task's notes; after
+  holds `notes_entry`, the entry the update appended, or null).
 - `conflict`: nothing written to progress; a Conflict record is created.
 - `duplicate`: the key already had an outcome; no effect, not a conflict.
 
@@ -70,6 +72,10 @@ Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 - `running` → `interrupted`, when the run was killed: the next run to start
   holds the lock, so it knows no other run is alive and marks it. `rerun`
   finishes a failed or interrupted run.
+- `interrupted` → `ok` or `failed`, only when two runs reach one database
+  through a hard link and its other name: the lock file is named from the
+  resolved path, which a symlink shares and a hard link doesn't, so a run
+  can mark a live one interrupted, and that run then ends as usual.
 
 ## Conflict status
 - `open` → `dismissed` (by a reviewer, with a note). No other transition.

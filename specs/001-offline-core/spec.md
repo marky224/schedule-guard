@@ -51,7 +51,8 @@ or any baseline.
   --confirm --reason "..."` appends the next baseline number from the
   current planned values and locks it; old baselines never change and
   history is kept (Q7). A locked baseline refuses new rows as well as
-  updates and deletes. Without `--confirm` or `--reason` it refuses. It
+  updates and deletes. Without `--confirm` or `--reason`, or with a reason
+  that isn't UTF-8, it refuses. It
   refuses past baseline number 10 (**UNVERIFIED**: MS Project's Baseline plus
   Baseline1–10, from memory; Learn's Baseline element page gives no range;
   checked in M7). Sync, rerun and report code never call it.
@@ -76,7 +77,12 @@ or any baseline.
   Applied updates write only progress fields and bump the task version by 1.
   `notes` is appended as `[date, source, submitter] text` and never replaces
   existing text (Q3); the date is `submitted_at`'s date in America/Chicago,
-  and entries are separated by a line feed.
+  and entries are separated by a line feed. An applied outcome stores the
+  task's progress before and after (`before_json`, `after_json`): the
+  version and the other four fields, without the task's notes; `after_json`
+  holds `notes_entry`, the entry the update appended, or null. So n notes
+  updates to one task store note text in proportion to n; `task_progress`
+  holds the whole notes.
 
   The guard (`guard.decide`) is pure: it takes the update, its task's
   current state and the clock, and returns one outcome. Its caller says
@@ -96,8 +102,11 @@ or any baseline.
   no control character besides tab, LF and CR (so no DEL and no C1
   control), at most 4,000 characters, and short enough that the task's
   notes, the new entry and its heading included, stay within 100,000
-  characters (characters as code points). A note's own line breaks stay
-  as typed. Null is no value, so
+  characters (characters as code points). A lone surrogate in notes is
+  `invalid_value` to the guard on its own; through the file source the
+  strict decoder refuses it first, so the line is an unkeyed `malformed`
+  conflict (US4). A note's own line breaks stay as typed. Null is no
+  value, so
   an update can't clear a field. G6 checks the merged state, so a task at
   100 % complete with no actual finish (as a file may import it) refuses
   every update that leaves it that way, a notes-only one too; the same
@@ -107,7 +116,10 @@ or any baseline.
   source_item_id)` order. Each item commits its outcome in its own
   `BEGIN IMMEDIATE` transaction. Each run gets a UUID4 id, trigger, counts,
   status and error. A second concurrent run is refused by an `fcntl` lock
-  file. `rerun <run-id>` reprocesses the items that run captured and records
+  file next to the database, named from its resolved path, so a `--db`
+  given through a symlink shares the real path's lock; a hard link is a
+  name of its own and still gets its own lock file. `rerun <run-id>`
+  reprocesses the items that run captured and records
   a new run with `rerun_of`. `conflicts dismiss <id> --note` is the only
   review action: dismiss only, and the field resubmits against the current
   version (Q5).
@@ -126,12 +138,14 @@ or any baseline.
   duplicates), then processes the captured items. A failed run records
   its error. A killed run is left `running` until the next run starts:
   that run holds the lock, so it knows no other run is alive and marks
-  the killed one `interrupted`. `rerun` finishes a failed or interrupted
+  the killed one `interrupted` (a run through a hard link has its own
+  lock, so it can mark a live run `interrupted`; that run then ends `ok`
+  or `failed`). `rerun` finishes a failed or interrupted
   run, and refuses, with one error line and exit 1, a run that captured
   nothing. A missing or oversize (over 20 MB) update file fails the run
   before anything is captured, so there is nothing to rerun. An
-  update-file name or a `--note` that isn't UTF-8 is refused the same way,
-  before anything is recorded.
+  update-file name, a `--note`, a rerun `RUN_ID` or a rebaseline `--reason`
+  that isn't UTF-8 is refused the same way, before anything is recorded.
 - **US5 Report (M5).** `report` serves GET-only HTML on 127.0.0.1: summary,
   planned vs actual with baseline variance, overdue (planned finish < today
   and % complete < 100, today injectable), milestones, conflicts, runs.

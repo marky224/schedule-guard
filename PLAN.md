@@ -217,6 +217,9 @@ source_update(id PK, source, source_item_id, item_version, task_uid,
 outcome(update_id PK -> source_update, status, reason_code, detail,
         run_id, decided_at, before_json, after_json)
     status applied or conflict; a duplicate writes no outcome
+    before_json, after_json: an applied update's version and progress
+    fields, without the task's notes; after_json's notes_entry is the
+    entry it appended, or null
 conflict(id PK, update_id UNIQUE, reason_code, detail,
          status CHECK(status IN ('open','dismissed')), reviewed_at, note)
 
@@ -225,7 +228,8 @@ sync_run(id TEXT PK,                         -- UUID4
          status CHECK(status IN ('running','ok','failed','interrupted')),
          seen, applied, conflicts, duplicates, error)
     interrupted: left running by a killed run, marked by the next run to
-    start (it holds the lock, so no other run is alive)
+    start (it holds the lock, so no other run is alive; a run through a
+    hard link to the DB file has its own lock, see section 5)
 run_item(run_id, update_id, PRIMARY KEY(run_id, update_id))  -- what a run captured
 source_cursor(source PK, cursor)             -- Phase 2: deltaLink
 writeback(update_id PK, target, payload_json, attempts, done_at,
@@ -282,7 +286,7 @@ with writing the outcome.
 | G6 | After merging with current values: `actual_finish` is before `actual_start`, or % complete is 100 without an `actual_finish` (Q6). | conflict `inconsistent_actuals` |
 | G7 | The target is a summary task. Project rolls summary tasks up from their subtasks (Q4). | conflict `summary_task` |
 | G8 | Phase 2 only: the same `source_item_id` was already decided at a different item version, so a user edited the row in place. | conflict `edited_after_submit` |
-| — | Otherwise | `applied`: write the progress fields, bump `version` by 1, store before/after |
+| — | Otherwise | `applied`: write the progress fields, bump `version` by 1, store before/after (without the task's notes; after holds the appended entry) |
 
 Rules that hold no matter which check fires:
 
@@ -300,7 +304,9 @@ Rules that hold no matter which check fires:
 - Each item is processed in its own transaction. If a run crashes halfway,
   rerunning it finishes the items that have no outcome yet. Concurrent runs
   (timer plus a manual `sync now`) are blocked by an `fcntl` lock file next to
-  the DB. The OS releases the lock if the process dies. A run that crashed
+  the DB, named from its resolved path, so a `--db` given through a symlink
+  shares it. A hard link to the DB file still gets its own lock file. The
+  OS releases the lock if the process dies. A run that crashed
   stays `running` until the next run starts, which marks it `interrupted`.
   A rerun of a run that captured nothing is refused.
 - No line stops a run. A line the source can't decode as strict JSON (no
