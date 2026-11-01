@@ -11,7 +11,7 @@ from contextlib import closing
 
 import pytest
 
-from schedule_guard.store.db import SCHEMA_VERSION, StoreError, open_db, transaction
+from schedule_guard.store.db import SCHEMA_VERSION, StoreError, open_db, open_db_read_only, transaction
 
 PROTECTED = {
     "project": "id",
@@ -405,6 +405,40 @@ def test_open_db_refuses_a_version_3_database_from_before_the_interrupted_status
         conn.execute("PRAGMA user_version = 3")
     with pytest.raises(StoreError, match=f"schema version 3; this schedule-guard uses {SCHEMA_VERSION}"):
         open_db(path)
+
+
+@pytest.mark.parametrize(
+    "sql",
+    [
+        "INSERT INTO sync_run (id, trigger, source, started_at, status) VALUES ('r', 'now', 'file:x', 't', 'ok')",
+        "UPDATE task_progress SET percent_complete = 50",
+        "DELETE FROM conflict",
+        "CREATE TABLE notes (text)",
+        "DROP TABLE run_item",
+        "PRAGMA user_version = 9",
+    ],
+    ids=["insert", "update", "delete", "create", "drop", "pragma"],
+)
+def test_a_read_only_connection_refuses_every_write(tmp_path, sql):
+    path = tmp_path / "store.db"
+    open_db(path, create=True).close()
+    before = path.read_bytes()
+    with closing(open_db_read_only(path)) as conn, pytest.raises(sqlite3.OperationalError, match="readonly"):
+        conn.execute(sql)
+    assert path.read_bytes() == before
+
+
+def test_a_read_only_connection_refuses_a_missing_or_foreign_file(tmp_path):
+    with pytest.raises(StoreError, match="can't open database"):
+        open_db_read_only(tmp_path / "typo.db")
+    assert not (tmp_path / "typo.db").exists()
+    (tmp_path / "notes.db").write_bytes(b"not a database, but long enough to have a header page" * 10)
+    with pytest.raises(StoreError, match="file is not a database"):
+        open_db_read_only(tmp_path / "notes.db")
+    with closing(sqlite3.connect(tmp_path / "m4.db")) as conn:
+        conn.execute("PRAGMA user_version = 3")
+    with pytest.raises(StoreError, match=f"schema version 3; this schedule-guard uses {SCHEMA_VERSION}"):
+        open_db_read_only(tmp_path / "m4.db")
 
 
 def test_the_sync_tables_have_the_planned_columns(tmp_path):

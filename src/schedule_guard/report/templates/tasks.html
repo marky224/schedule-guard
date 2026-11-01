@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<p>Planned against actual. Variance is the planned date minus baseline {{ baseline if baseline is not none else "(none)" }}'s, in calendar days. A summary task's % complete is as imported: Project rolls it up from its subtasks.</p>
+<table>
+  <tr><th>UID</th><th>WBS</th><th>Name</th><th>Planned start</th><th>Planned finish</th><th>Baseline start</th><th>Baseline finish</th><th>Start variance</th><th>Finish variance</th><th>% complete</th><th>Actual start</th><th>Actual finish</th><th>Remaining work</th><th>Version</th><th>Notes</th></tr>
+  {% for t in tasks %}
+  <tr>
+    <td class="number">{{ t.uid }}</td><td>{{ t.wbs or "" }}</td><td>{{ t.name or "" }}{% if t.is_summary %} <span class="muted">(summary)</span>{% endif %}{% if t.is_milestone %} <span class="muted">(milestone)</span>{% endif %}</td>
+    <td>{{ t.planned_start or "" }}</td><td>{{ t.planned_finish or "" }}</td><td>{{ t.baseline_start or "" }}</td><td>{{ t.baseline_finish or "" }}</td>
+    <td class="number">{{ t.start_variance or "" }}</td><td class="number">{{ t.finish_variance or "" }}</td>
+    <td class="number">{{ t.percent_complete if t.percent_complete is not none else "" }}</td><td>{{ t.actual_start or "" }}</td><td>{{ t.actual_finish or "" }}</td><td>{{ t.remaining_work or "" }}</td>
+    <td class="number">{{ t.version }}</td><td class="notes">{{ t.notes or "" }}</td>
+  </tr>
+  {% endfor %}
+</table>
+{% endblock %}

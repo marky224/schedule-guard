@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<p>Updates that were not applied. A conflict is never applied: the reviewer dismisses it with a note, and the field resubmits against the task's current version.</p>
+<table>
+  <tr><th>ID</th><th>Status</th><th>Reason</th><th>Task</th><th>Item</th><th>Submitted by</th><th>Submitted at</th><th>Decided</th><th>Detail</th><th>Reviewed</th><th>Note</th></tr>
+  {% for c in conflicts %}
+  <tr>
+    <td class="number">{{ c.id }}</td><td>{{ c.status }}</td><td>{{ c.reason_code }}</td><td class="number">{{ c.task_uid if c.task_uid is not none else "" }}</td>
+    <td>{{ c.source }}:{{ c.source_item_id }} version {{ c.item_version }}</td><td>{{ c.submitted_by or "" }}</td><td>{{ c.submitted_at or "" }}</td><td>{{ c.decided_at or "" }}</td>
+    <td class="detail">{{ c.detail or "" }}</td><td>{{ c.reviewed_at or "" }}</td><td class="notes">{{ c.note or "" }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="11">No conflicts.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

@@ -79,7 +79,23 @@ def build_parser() -> argparse.ArgumentParser:
     dismissal.add_argument("id", type=int, metavar="ID")
     dismissal.add_argument("--note", metavar="TEXT", help="required: why it is dismissed")
     dismissal.set_defaults(run=_conflicts_dismiss)
+
+    report = commands.add_parser("report", parents=[db], help="serve the read-only HTML report on 127.0.0.1")
+    report.add_argument(
+        "--port", type=_port, default=8000, metavar="PORT", help="the port on 127.0.0.1 (default: 8000)"
+    )
+    report.set_defaults(run=_serve_report)
     return parser
+
+
+def _port(text: str) -> int:
+    try:
+        port = int(text)
+    except ValueError:
+        port = -1
+    if not 0 <= port <= 65535:
+        raise argparse.ArgumentTypeError(f"not a port from 0 to 65535: {text!r}")
+    return port
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -208,6 +224,13 @@ def _conflicts_dismiss(args: argparse.Namespace) -> int:
     finally:
         conn.close()
     print(f"dismissed conflict {args.id}; the update stays unapplied")
+    return 0
+
+
+def _serve_report(args: argparse.Namespace) -> int:
+    from schedule_guard.report.app import create_app, server  # FastAPI and uvicorn load only to serve
+
+    server(create_app(args.db, clock=_now), args.port).run()
     return 0
 
 

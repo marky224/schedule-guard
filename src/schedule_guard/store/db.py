@@ -1,4 +1,4 @@
-"""Open a schedule-guard database and set up its schema.
+"""Open a schedule-guard database and set up its schema, or open one read-only for the report.
 
 Connections keep SQLite's defaults (triggers on, recursive_triggers OFF);
 the schema's protection doesn't depend on any pragma. They run in
@@ -42,6 +42,29 @@ def open_db(path: str | Path, *, create: bool = False) -> sqlite3.Connection:
     except BaseException:
         conn.close()
         raise
+    return conn
+
+
+def open_db_read_only(path: str | Path) -> sqlite3.Connection:
+    """Open an existing database for reading only, as the report does.
+
+    The file is opened with mode=ro, so SQLite refuses every write on the
+    connection, and query_only is set too. Nothing is set up or migrated:
+    a missing file, or one at another schema version, is refused.
+    """
+    try:
+        conn = sqlite3.connect(f"{Path(path).absolute().as_uri()}?mode=ro", uri=True, isolation_level=None)
+    except sqlite3.Error as exc:
+        raise StoreError(f"can't open database {path}: {exc}") from exc
+    try:
+        conn.execute("PRAGMA query_only = ON")
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+    except sqlite3.DatabaseError as exc:  # e.g. "file is not a database"
+        conn.close()
+        raise StoreError(f"can't use database {path}: {exc}") from exc
+    if version != SCHEMA_VERSION:
+        conn.close()
+        raise StoreError(f"database schema version {version}; this schedule-guard uses {SCHEMA_VERSION}")
     return conn
 
 
