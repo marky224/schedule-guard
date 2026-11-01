@@ -78,7 +78,7 @@ Everything runs on one Linux PC. All network calls go out from it: Graph,
 the Entra token endpoint, and the Workflows trigger URL. Nothing listens for
 inbound traffic. The report binds to `127.0.0.1`.
 
-### Layout (`[M0]`, `[M1]`, `[M2]`, `[M3]`, `[M4]` = exists since that milestone; everything else comes in later runs)
+### Layout (`[M0]`–`[M5]` = exists since that milestone; everything else comes in later runs)
 
 ```
 pyproject.toml, uv.lock              [M0] uv-managed, Python 3.12
@@ -87,10 +87,10 @@ CLAUDE.md                            [M0] stack, commands, map, invariants
 specs/001-offline-core/              [M0] spec, plan, tasks for M1–M6
 src/schedule_guard/                  [M0]
   __init__.py                        [M0] package version
-  cli.py                             [M0] argparse entry point: `schedule-guard ...` (`--version`, `import`, `baseline lock`, `rebaseline` so far)
+  cli.py                             [M0] argparse entry point: `schedule-guard ...` (the Phase 1 commands below)
   mspdi/parse.py                     [M1] safe MSPDI reader (defusedxml)
   mspdi/export.py                    progress-only MSPDI writer (Phase 2)
-  store/schema.sql, store/db.py      [M2] SQLite schema, read-only triggers; open/migrate, transactions
+  store/schema.sql, store/db.py      [M2] SQLite schema, read-only triggers; open/migrate, transactions, read-only open (M5)
   importer.py                        [M2] `import` into an empty database
   baselines.py                       [M2] `baseline lock`, `rebaseline`
   clock.py                           [M3] injectable clock; today is the America/Chicago date
@@ -104,11 +104,11 @@ src/schedule_guard/                  [M0]
   graph/auth.py, graph/client.py     Phase 2: certificate auth, paging, retries
   publish.py                         Phase 2: Tasks list publisher + write-back outbox
   alerts/workflows.py                Phase 2: failed-run post to Workflows URL
-  report/app.py, report/templates/   read-only HTML report
-  demo.py                            loads fake data for screenshots
+  report/app.py, report/templates/   [M5] read-only HTML report
+  demo.py                            [M5] builds the demo database for the report
 scripts/make_fixture.py              [M1] deterministic fixture generator
-tests/fixtures/                      [M1] generated MSPDI + update files (fake data only; `riverbend-clinic.xml`, `updates/week-44.jsonl` so far)
-tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py`, `test_fixture.py`, `test_mspdi_parse.py`, `test_store_triggers.py`, `test_import.py`, `test_baselines.py`, `test_clock.py`, `test_guard_rules.py`, `test_progress.py`, `test_sources.py`, `test_sync.py`, `test_review.py`, `conftest.py`, `properties/` so far)
+tests/fixtures/                      [M1] generated MSPDI + update files (fake data only; `riverbend-clinic.xml`, `updates/week-44.jsonl`, `demo-updates.jsonl` so far)
+tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py`, `test_fixture.py`, `test_mspdi_parse.py`, `test_store_triggers.py`, `test_import.py`, `test_baselines.py`, `test_clock.py`, `test_guard_rules.py`, `test_progress.py`, `test_sources.py`, `test_sync.py`, `test_review.py`, `test_report.py`, `test_demo.py`, `conftest.py`, `properties/` so far)
 deploy/systemd/                      user .service + .timer (Phase 2)
 docs/tenant-setup.md                 Phase 2 runbook for the tenant admin
 docs/spike-graph-selected.md         Phase 2 spike results
@@ -126,11 +126,12 @@ CLI (Phase 1):
 | `schedule-guard sync daily --db <path> --source file:<path>` | Same as `sync now`, labelled `daily`. The timer calls this one. |
 | `schedule-guard rerun --db <path> <run-id>` | Reprocesses the source items that run captured. Keys already decided count as duplicates. Records a new run with `rerun_of`. Refuses a run that captured nothing. |
 | `schedule-guard runs list --db <path>` / `conflicts list --db <path> [--all]` / `conflicts dismiss --db <path> <id> --note "..."` | Inspect runs and conflicts. Dismiss a conflict with a note; it is never applied. |
-| `schedule-guard report [--port 8000]` | Serves the read-only HTML report on 127.0.0.1. |
-| `schedule-guard demo [--db <path>]` | Builds a fresh demo DB from the fixture and scripted updates (some applied, some conflicts), then serves the report. |
+| `schedule-guard report --db <path> [--port 8000]` | Serves the read-only HTML report on 127.0.0.1 only. |
+| `schedule-guard demo [--db <path>] [--port 8000]` | Builds a new demo DB from the fixture and scripted updates (some applied, some conflicts), then serves the report on it. The path must not exist; without `--db` the DB lives in a temporary directory removed on exit. |
 | `schedule-guard export <out.xml>` | Phase 2 (offline). Writes MSPDI with progress applied and the baseline untouched. |
 
-Every command that uses the database takes `--db <path>` (required); the
+Every command that uses the database takes `--db <path>` (required; `demo`
+builds a new one, in a temporary directory if `--db` is left out); the
 file lives outside the repo or in a gitignored path (§4). In Phase 1, `sync`
 also needs `--source file:<path>`, a JSON Lines update file (§6).
 
@@ -366,16 +367,27 @@ Rules that hold no matter which check fires:
 ## 7. Report (FastAPI, read-only)
 
 - GET-only routes: `/` (summary), `/tasks` (planned vs actual with baseline
-  variance), `/overdue`, `/milestones`, `/conflicts`, `/runs`.
+  variance), `/overdue`, `/milestones`, `/conflicts`, `/runs`. Any other
+  method is 405.
+- Variance is planned minus the latest baseline (the highest number:
+  `rebaseline` appends the next), in calendar days.
 - Overdue means planned finish < today and % complete < 100. "Today" is
-  injectable so tests are deterministic.
-- Server-rendered Jinja2 with autoescape on. No JS needed. No forms, no
-  mutation routes. Tests assert POST/PUT/DELETE return 405, and that a task
-  named `<script>` is escaped.
-- `demo` writes a throwaway DB from the fixture plus `demo-updates.jsonl`. The
-  result has applied progress, an overdue task, a reached milestone and
-  several open conflicts of different types, which is enough for screenshots.
-  There is no hosted public demo.
+  injectable so tests are deterministic. A summary task's % complete is
+  shown as imported, since Project rolls it up (Q4).
+- Read-only: each page opens the DB with `mode=ro` and `query_only`, so
+  SQLite refuses any write, and reads one snapshot. The report code has no
+  INSERT, UPDATE, DELETE or DDL and imports no command that writes.
+- Server-rendered Jinja2 with autoescape on, never `|safe`. No JS, no forms,
+  no mutation routes, FastAPI's docs pages off, and a
+  Content-Security-Policy that allows only inline style. Tests assert
+  POST/PUT/PATCH/DELETE return 405, that a task name and a note holding
+  `<script>` are escaped, and that a GET of every route leaves the DB file
+  byte-identical.
+- `demo` writes a new DB from the fixture plus `demo-updates.jsonl` (fake
+  "(demo)" crews), never into an existing file, with a fixed demo clock.
+  The result has applied progress, overdue tasks, two reached milestones and
+  open conflicts of seven kinds, which is enough for screenshots. There is
+  no hosted public demo.
 
 ## 8. Test strategy (the oracle)
 

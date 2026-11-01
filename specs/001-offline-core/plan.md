@@ -42,9 +42,10 @@
 - Create (M5): `src/schedule_guard/report/__init__.py`,
   `src/schedule_guard/report/app.py`, `src/schedule_guard/report/templates/*.html`,
   `src/schedule_guard/demo.py`, `tests/fixtures/demo-updates.jsonl`,
-  `tests/test_report.py`
+  `tests/test_report.py`, `tests/test_demo.py`
 - Create (M6): `tests/test_hygiene.py`, `.github/workflows/ci.yml`
 - Modify: `src/schedule_guard/cli.py` (subcommands per milestone),
+  `src/schedule_guard/store/db.py` (the report's read-only open, M5),
   `README.md` (M6), `CLAUDE.md` (map and commands as directories appear),
   `.claude/skills/domain/ontology.md` (after M2)
 - Do not touch: `PLAN.md` decisions (§15), `LICENSE`, `uv.lock` except via

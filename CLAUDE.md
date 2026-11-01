@@ -20,6 +20,9 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 - Sync an update file: `uv run schedule-guard sync now --db <path> --source
   file:tests/fixtures/updates/week-44.jsonl`; then `runs list`, `conflicts
   list`, `conflicts dismiss <id> --note "..."`, `rerun <run-id>`
+- Report: `uv run schedule-guard report --db <path> [--port 8000]` (read-only,
+  127.0.0.1 only); `uv run schedule-guard demo [--db <new path>]` builds a
+  demo database from the fixture and serves the report on it
 - Test all: `uv run pytest -q` (Hypothesis is derandomized: the same examples every run)
 - Test one: `uv run pytest -q tests/test_smoke.py::test_cli_version_prints_package_version`
 - Regenerate the MSPDI fixture: `uv run python scripts/make_fixture.py`
@@ -34,15 +37,18 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
   the executable domain model, opened by `store/db.py`; `importer.py`,
   `baselines.py`; `clock.py`, `guard.py` the pure guard G0–G7,
   `progress.py` the applier; `sources/` the source protocol and the JSON
-  Lines file source, `sync.py` the sync engine, `review.py` conflict review)
+  Lines file source, `sync.py` the sync engine, `review.py` conflict review;
+  `report/` the read-only FastAPI report and its Jinja2 templates,
+  `demo.py` the demo database)
 - tests/ — oracles (smoke, fixture, MSPDI parser, store trigger, import,
-  baseline, clock, guard rule, applier, source, sync and review tests;
+  baseline, clock, guard rule, applier, source, sync, review, report and
+  demo tests;
   `conftest.py` shared fixtures and the Hypothesis profile)
 - tests/properties/ — Hypothesis P1–P6 on the sync engine, a property that
   no line stops a run, the state machine and the teeth test (`harness.py`
   writes the update files)
 - tests/fixtures/ — generated, fictional inputs (`riverbend-clinic.xml`,
-  `updates/week-44.jsonl`)
+  `updates/week-44.jsonl`, `demo-updates.jsonl`)
 - scripts/ — `make_fixture.py`, the seeded fixture generator
 - specs/001-offline-core/ — spec.md, plan.md, tasks.md for M1–M6
 - .claude/skills/domain/ — ontology, glossary (present)

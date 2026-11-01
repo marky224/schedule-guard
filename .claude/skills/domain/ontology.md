@@ -1,8 +1,9 @@
 # Domain ontology: schedule-guard
 
 Status: current for every Phase 1 table (`src/schedule_guard/store/schema.sql`,
-M2–M4), the guard's outcomes (`src/schedule_guard/guard.py`, M3) and sync
-(`src/schedule_guard/sync.py`, M4); the Phase 2 tables are still planned
+M2–M4), the guard's outcomes (`src/schedule_guard/guard.py`, M3), sync
+(`src/schedule_guard/sync.py`, M4) and the read-only report
+(`src/schedule_guard/report/`, M5); the Phase 2 tables are still planned
 (PLAN.md §3–5)
 Last verified: 2026-11-01
 Executable source of truth: src/ schemas. If this page disagrees with code, code wins.
@@ -101,6 +102,9 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
   and receives alerts.
 - Sync (`sync now|daily`, `rerun`) is run by the timer or any operator; it
   never needs a role, because it can only apply progress fields.
+- The report (`report`, and `demo`, which builds a new database first) is
+  for anyone on the host: it only reads, through a read-only connection,
+  and listens on 127.0.0.1 only.
 - Phase 1 is a local CLI with no authentication: anyone with shell access to
   the host and the DB file can run every command. The roles above are
   conventions, not enforced checks. Whoever runs a command, the DB triggers

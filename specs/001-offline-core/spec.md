@@ -1,7 +1,8 @@
 # Spec: 001 offline core (PLAN.md milestones M1–M6)
 
 Status: derived from the approved PLAN.md (approved 2026-10-23); M1 done
-2026-10-29, M2, M3 and M4 done 2026-10-30, M5–M6 not started.
+2026-10-29, M2, M3 and M4 done 2026-10-30, M5 done 2026-11-01, M6 not
+started.
 Source plan: [PLAN.md](../../PLAN.md) §1–8, §11. Terms: `.claude/skills/domain/`.
 
 ## Problem
@@ -146,12 +147,23 @@ or any baseline.
   before anything is captured, so there is nothing to rerun. An
   update-file name, a `--note`, a rerun `RUN_ID` or a rebaseline `--reason`
   that isn't UTF-8 is refused the same way, before anything is recorded.
-- **US5 Report (M5).** `report` serves GET-only HTML on 127.0.0.1: summary,
-  planned vs actual with baseline variance, overdue (planned finish < today
-  and % complete < 100, today injectable), milestones, conflicts, runs.
-  Jinja2 autoescape on. `demo` builds a throwaway DB from the fixture plus
-  scripted updates covering applied, overdue, a reached milestone and several
-  conflict types, then serves the report.
+- **US5 Report (M5).** `report --db <path> [--port 8000]` serves GET-only
+  HTML on 127.0.0.1 only: summary, planned vs actual with the start and
+  finish variance from the latest baseline (planned minus baseline, in
+  calendar days), overdue (planned finish before today and % complete
+  under 100, today from the injectable clock as the America/Chicago date),
+  milestones (reached, overdue or upcoming), conflicts, runs. Any other
+  method is 405. It only reads: each page opens the database read-only
+  (`mode=ro` and `query_only`) and reads one snapshot. Jinja2 autoescape
+  on, no `|safe`; no JS, no forms, FastAPI's docs pages off, and a
+  Content-Security-Policy that allows only inline style. A summary task's
+  % complete is shown as imported. `demo [--db <path>] [--port 8000]`
+  builds a new database (an existing file is refused, never written; no
+  `--db` means a temporary directory removed on exit) from the fixture
+  plus `tests/fixtures/demo-updates.jsonl`, written by hand with fake
+  "(demo)" crews, with Baseline 0 locked and a fixed demo clock
+  (2026-10-30 in Chicago): applied progress, overdue tasks, two reached
+  milestones and open conflicts of seven kinds. Then it serves the report.
 - **US6 Hygiene and CI (M6).** A test scans tracked files for GUID-shaped
   strings outside an explicit fixture allowlist, tenant or secret
   assignments, and key files. A GitHub Actions workflow runs
@@ -258,7 +270,9 @@ or any baseline.
   arbitrary lines (lone surrogates, nesting at the decoder's limit, huge
   numbers, bytes that aren't UTF-8) between valid ones, and every run ends
   ok with every line decided.
-- M5: POST/PUT/DELETE return 405; a `<script>` task name is escaped; overdue
+- M5: POST/PUT/PATCH/DELETE return 405 on every route; a `<script>` task
+  name and note are escaped; the database file is byte-identical after a
+  GET of every route; the report binds 127.0.0.1; overdue
   is correct for a fixed today; `demo` serves a page with every section
   populated.
 - M6: the hygiene test passes on the repo and fails on a planted GUID in a

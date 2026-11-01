@@ -39,9 +39,9 @@ Format: `- [ ] T000 [P?] [USn] Description (path)`
 - [x] T046 [US4] Hypothesis P3, P6 (`tests/properties/test_sync_properties.py`)
 - [x] T047 [US4] `RuleBasedStateMachine` checking P1–P5 (`tests/properties/test_state_machine.py`)
 ### M5: report and demo
-- [ ] T050 [US5] GET-only FastAPI app and Jinja2 templates (`src/schedule_guard/report/app.py`, `src/schedule_guard/report/templates/`)
-- [ ] T051 [US5] `demo` command and scripted updates (`src/schedule_guard/demo.py`, `tests/fixtures/demo-updates.jsonl`)
-- [ ] T052 [P] [US5] Report tests: 405s, escaping, overdue with fixed today (`tests/test_report.py`)
+- [x] T050 [US5] GET-only FastAPI app and Jinja2 templates (`src/schedule_guard/report/app.py`, `src/schedule_guard/report/templates/`)
+- [x] T051 [US5] `demo` command and scripted updates (`src/schedule_guard/demo.py`, `tests/fixtures/demo-updates.jsonl`)
+- [x] T052 [P] [US5] Report tests: 405s, escaping, overdue with fixed today (`tests/test_report.py`)
 ### M6: wrap-up
 - [ ] T060 [US6] Hygiene test with fixture GUID allowlist (`tests/test_hygiene.py`)
 - [ ] T061 [US6] GitHub Actions running `uv run pytest -q`; max-effort review of the config (Q15) (`.github/workflows/ci.yml`)
