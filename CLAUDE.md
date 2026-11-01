@@ -21,8 +21,11 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
   file:tests/fixtures/updates/week-44.jsonl`; then `runs list`, `conflicts
   list`, `conflicts dismiss <id> --note "..."`, `rerun <run-id>`
 - Report: `uv run schedule-guard report --db <path> [--port 8000]` (read-only,
-  127.0.0.1 only); `uv run schedule-guard demo [--db <new path>]` builds a
-  demo database from the fixture and serves the report on it
+  127.0.0.1 only, and only a Host of 127.0.0.1 or localhost);
+  `uv run schedule-guard demo [--db <new path>]` builds a demo database from
+  the fixture and serves the report on it; Ctrl+C, SIGTERM or SIGHUP stops
+  either with exit 0 (the demo's temporary directory, with no `--db`, goes
+  then; a SIGKILL leaves it)
 - Test all: `uv run pytest -q` (Hypothesis is derandomized: the same examples every run)
 - Test one: `uv run pytest -q tests/test_smoke.py::test_cli_version_prints_package_version`
 - Regenerate the MSPDI fixture: `uv run python scripts/make_fixture.py`

@@ -104,7 +104,8 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
   never needs a role, because it can only apply progress fields.
 - The report (`report`, and `demo`, which builds a new database first) is
   for anyone on the host: it only reads, through a read-only connection,
-  and listens on 127.0.0.1 only.
+  listens on 127.0.0.1 only and answers only a Host of 127.0.0.1 or
+  localhost (400 for any other, so a rebound domain can't read it).
 - Phase 1 is a local CLI with no authentication: anyone with shell access to
   the host and the DB file can run every command. The roles above are
   conventions, not enforced checks. Whoever runs a command, the DB triggers
@@ -128,6 +129,10 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
   update that supplies it or lowers % complete). An update can't clear a
   field.
 - Progress on summary tasks is rejected (`summary_task`).
+- The report's variance uses the newest baseline `rebaseline` added, else
+  Baseline 0; an imported baseline with a higher number is never used.
+  Its overdue list holds leaf tasks only, since a summary task's
+  % complete stays as imported.
 - `notes` is appended as dated entries; existing text is never replaced.
   The submitter's name holds at most 100 characters, no control character
   and no `[` or `]`; the note holds at most 4,000 characters, only XML 1.0

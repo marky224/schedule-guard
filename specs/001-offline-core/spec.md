@@ -137,11 +137,12 @@ or any baseline.
   run, and the lines around it are still decided. A run first captures
   every line (a key given twice in one run counts once, the rest as
   duplicates), then processes the captured items. A failed run records
-  its error. A killed run is left `running` until the next run starts:
-  that run holds the lock, so it knows no other run is alive and marks
-  the killed one `interrupted` (a run through a hard link has its own
-  lock, so it can mark a live run `interrupted`; that run then ends `ok`
-  or `failed`). `rerun` finishes a failed or interrupted
+  its error. A killed run is left `running` until the next run starts,
+  which holds the lock and marks it `interrupted`. A live run can be
+  marked too when the next run takes another lock file: through a hard
+  link to the database, or after the lock file was deleted or the
+  database renamed while the live run held it; that run then ends `ok`
+  or `failed`. `rerun` finishes a failed or interrupted
   run, and refuses, with one error line and exit 1, a run that captured
   nothing. A missing or oversize (over 20 MB) update file fails the run
   before anything is captured, so there is nothing to rerun. An
@@ -149,21 +150,30 @@ or any baseline.
   that isn't UTF-8 is refused the same way, before anything is recorded.
 - **US5 Report (M5).** `report --db <path> [--port 8000]` serves GET-only
   HTML on 127.0.0.1 only: summary, planned vs actual with the start and
-  finish variance from the latest baseline (planned minus baseline, in
-  calendar days), overdue (planned finish before today and % complete
+  finish variance (planned minus baseline, in calendar days) from the
+  newest baseline `rebaseline` added, else Baseline 0, never an imported
+  baseline with a higher number (each page names the number used, or
+  none), overdue leaf tasks (planned finish before today and % complete
   under 100, today from the injectable clock as the America/Chicago date),
   milestones (reached, overdue or upcoming), conflicts, runs. Any other
-  method is 405. It only reads: each page opens the database read-only
-  (`mode=ro` and `query_only`) and reads one snapshot. Jinja2 autoescape
+  method is 405. It answers only a Host of `127.0.0.1` or `localhost`
+  (any port); any other Host gets 400 on every route. It only reads:
+  each page opens the database read-only (`mode=ro` and `query_only`)
+  and reads one snapshot. Jinja2 autoescape
   on, no `|safe`; no JS, no forms, FastAPI's docs pages off, and a
   Content-Security-Policy that allows only inline style. A summary task's
-  % complete is shown as imported. `demo [--db <path>] [--port 8000]`
+  % complete is shown as imported, so summary tasks stay on `/tasks`,
+  marked, and are never listed as overdue. A project with no name shows
+  "(no name)". `demo [--db <path>] [--port 8000]`
   builds a new database (an existing file is refused, never written; no
-  `--db` means a temporary directory removed on exit) from the fixture
+  `--db` means a temporary directory, removed when the demo stops on
+  Ctrl+C, SIGTERM or SIGHUP; a SIGKILL leaves it) from the fixture
   plus `tests/fixtures/demo-updates.jsonl`, written by hand with fake
   "(demo)" crews, with Baseline 0 locked and a fixed demo clock
   (2026-10-30 in Chicago): applied progress, overdue tasks, two reached
   milestones and open conflicts of seven kinds. Then it serves the report.
+  Ctrl+C, SIGTERM or SIGHUP stops `report` or `demo` with exit 0 and no
+  traceback once uvicorn has shut down.
 - **US6 Hygiene and CI (M6).** A test scans tracked files for GUID-shaped
   strings outside an explicit fixture allowlist, tenant or secret
   assignments, and key files. A GitHub Actions workflow runs

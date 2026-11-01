@@ -76,7 +76,8 @@ flowchart LR
 
 Everything runs on one Linux PC. All network calls go out from it: Graph,
 the Entra token endpoint, and the Workflows trigger URL. Nothing listens for
-inbound traffic. The report binds to `127.0.0.1`.
+inbound traffic. The report binds to `127.0.0.1` and answers only a Host
+of `127.0.0.1` or `localhost`.
 
 ### Layout (`[M0]`–`[M5]` = exists since that milestone; everything else comes in later runs)
 
@@ -126,8 +127,8 @@ CLI (Phase 1):
 | `schedule-guard sync daily --db <path> --source file:<path>` | Same as `sync now`, labelled `daily`. The timer calls this one. |
 | `schedule-guard rerun --db <path> <run-id>` | Reprocesses the source items that run captured. Keys already decided count as duplicates. Records a new run with `rerun_of`. Refuses a run that captured nothing. |
 | `schedule-guard runs list --db <path>` / `conflicts list --db <path> [--all]` / `conflicts dismiss --db <path> <id> --note "..."` | Inspect runs and conflicts. Dismiss a conflict with a note; it is never applied. |
-| `schedule-guard report --db <path> [--port 8000]` | Serves the read-only HTML report on 127.0.0.1 only. |
-| `schedule-guard demo [--db <path>] [--port 8000]` | Builds a new demo DB from the fixture and scripted updates (some applied, some conflicts), then serves the report on it. The path must not exist; without `--db` the DB lives in a temporary directory removed on exit. |
+| `schedule-guard report --db <path> [--port 8000]` | Serves the read-only HTML report on 127.0.0.1 only. Ctrl+C, SIGTERM or SIGHUP stops it with exit 0. |
+| `schedule-guard demo [--db <path>] [--port 8000]` | Builds a new demo DB from the fixture and scripted updates (some applied, some conflicts), then serves the report on it. The path must not exist; without `--db` the DB lives in a temporary directory, removed when the demo stops on Ctrl+C, SIGTERM or SIGHUP (a SIGKILL leaves it). |
 | `schedule-guard export <out.xml>` | Phase 2 (offline). Writes MSPDI with progress applied and the baseline untouched. |
 
 Every command that uses the database takes `--db <path>` (required; `demo`
@@ -369,20 +370,33 @@ Rules that hold no matter which check fires:
 - GET-only routes: `/` (summary), `/tasks` (planned vs actual with baseline
   variance), `/overdue`, `/milestones`, `/conflicts`, `/runs`. Any other
   method is 405.
-- Variance is planned minus the latest baseline (the highest number:
-  `rebaseline` appends the next), in calendar days.
-- Overdue means planned finish < today and % complete < 100. "Today" is
-  injectable so tests are deterministic. A summary task's % complete is
-  shown as imported, since Project rolls it up (Q4).
+- Variance is planned minus a baseline, in calendar days: the newest
+  baseline `rebaseline` added, else Baseline 0. An imported baseline with
+  a higher number is never used, since a file can keep an archive there.
+  Each page with variance names the number used, or says there is none.
+- Overdue means a leaf task with planned finish < today and % complete
+  < 100. "Today" is injectable so tests are deterministic. A summary
+  task's % complete is shown as imported, since Project rolls it up (Q4),
+  so summary tasks stay on `/tasks`, marked, and are never listed as
+  overdue.
+- Host check: the report listens on 127.0.0.1 and answers only a Host of
+  `127.0.0.1` or `localhost` (any port), through Starlette's
+  `TrustedHostMiddleware`; any other Host gets 400 on every route, so a
+  page that points its own domain at 127.0.0.1 (DNS rebinding) can't read
+  the report. There is no `--host` option.
 - Read-only: each page opens the DB with `mode=ro` and `query_only`, so
   SQLite refuses any write, and reads one snapshot. The report code has no
   INSERT, UPDATE, DELETE or DDL and imports no command that writes.
 - Server-rendered Jinja2 with autoescape on, never `|safe`. No JS, no forms,
   no mutation routes, FastAPI's docs pages off, and a
   Content-Security-Policy that allows only inline style. Tests assert
-  POST/PUT/PATCH/DELETE return 405, that a task name and a note holding
-  `<script>` are escaped, and that a GET of every route leaves the DB file
-  byte-identical.
+  POST/PUT/PATCH/DELETE return 405, that a foreign Host gets 400, that a
+  task name and a note holding `<script>` are escaped, and that a GET of
+  every route leaves the DB file byte-identical.
+- Stopping: Ctrl+C, SIGTERM or SIGHUP stops `report` and `demo` with exit
+  0 and no traceback, once uvicorn has shut down, and the demo's
+  temporary directory (no `--db`) is removed then. A SIGKILL can't be
+  caught and leaves the directory in the system's temporary directory.
 - `demo` writes a new DB from the fixture plus `demo-updates.jsonl` (fake
   "(demo)" crews), never into an existing file, with a fixed demo clock.
   The result has applied progress, overdue tasks, two reached milestones and

@@ -17,9 +17,11 @@ its source couldn't decode or key is a `malformed` conflict.
 If a run stops halfway, `rerun` captures the same items again and
 processes them the same way: decided keys come back as duplicates, the rest
 are decided as the first run would have. A run killed partway is left
-`running`; the next run to start holds the lock, so it knows no other run
-is alive and marks that one `interrupted`. Sync never imports the baseline
-commands.
+`running`; the next run to start holds the lock and marks that one
+`interrupted`. A live run is marked too if it took another lock file
+(through a hard link, or the lock file was deleted or the database renamed
+while it held it); it then ends `ok` or `failed`. Sync never imports the
+baseline commands.
 """
 
 import fcntl
@@ -141,7 +143,8 @@ def _run(
             raise SyncRefused("no project has been imported into this database")
         run_id = str(uuid.uuid4())
         with transaction(conn):
-            # This run holds the lock, so no other run is alive: one still running was killed.
+            # One still running was killed, or took another lock file (through a hard link, or its lock
+            # file was deleted or the DB renamed while it held it) and will end ok or failed itself.
             conn.execute("UPDATE sync_run SET status = 'interrupted' WHERE status = 'running'")
             conn.execute(
                 "INSERT INTO sync_run (id, trigger, rerun_of, source, started_at, status) VALUES (?, ?, ?, ?, ?, 'running')",
