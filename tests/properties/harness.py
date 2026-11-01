@@ -185,7 +185,12 @@ def applied_updates(conn: sqlite3.Connection) -> list[tuple[int, dict, dict, dic
 
 
 def assert_all_or_nothing(conn: sqlite3.Connection, imported: dict) -> None:
-    """P4: one outcome per key; an applied update changes only its fields, and nothing else changes progress."""
+    """P4: one outcome per key; an applied update changes only its fields, and nothing else changes progress.
+
+    An outcome keeps only the entry its update appended to the notes, so the
+    task's notes are rebuilt from the imported ones and each applied entry in
+    turn, and must end as task_progress holds them.
+    """
     captured = conn.execute("SELECT count(*) FROM source_update").fetchone()[0]
     assert conn.execute("SELECT count(*) FROM outcome").fetchone()[0] == captured
     chains: dict[int, list[tuple[dict, dict]]] = {}
@@ -193,13 +198,14 @@ def assert_all_or_nothing(conn: sqlite3.Connection, imported: dict) -> None:
         assert set(fields) <= set(PROGRESS_FIELDS), fields
         assert after["version"] == before["version"] + 1
         for name in PROGRESS_FIELDS:
-            if name not in fields:
+            if name == "notes":
+                entry = after["notes_entry"]
+                assert (entry is None) == (name not in fields), entry
+                assert entry is None or (entry.startswith("[") and entry.endswith(f"] {fields[name]}")), entry
+            elif name not in fields:
                 assert after[name] == before[name], name
             elif name == "remaining_work":
                 assert hours(after[name]) == Decimal(str(fields[name])), (fields[name], after[name])
-            elif name == "notes":
-                assert after[name].endswith(f"] {fields[name]}")
-                assert before[name] is None or after[name].startswith(f"{before[name]}\n")
             else:
                 assert after[name] == fields[name], name
         chains.setdefault(uid, []).append((before, after))
@@ -208,9 +214,11 @@ def assert_all_or_nothing(conn: sqlite3.Connection, imported: dict) -> None:
         steps = sorted(chains.get(uid, []), key=lambda step: step[0]["version"])
         state = _as_progress(imported[uid])
         for before, after in steps:  # each applied update starts where the previous one ended
-            assert before == state, (uid, before, state)
-            state = after
-        assert _as_progress(row) == state, uid  # and nothing else moved the task's progress
+            assert before == {k: v for k, v in state.items() if k != "notes"}, (uid, before, state)
+            notes, entry = state["notes"], after["notes_entry"]
+            state = {k: v for k, v in after.items() if k != "notes_entry"}
+            state["notes"] = notes if entry is None else f"{notes}\n{entry}" if notes else entry  # appended
+        assert _as_progress(row) == state, uid  # and nothing else moved the task's progress, notes included
 
 
 def assert_stale_never_applied(conn: sqlite3.Connection) -> None:

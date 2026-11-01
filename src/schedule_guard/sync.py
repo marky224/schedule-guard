@@ -35,7 +35,7 @@ from pathlib import Path
 
 from schedule_guard import progress
 from schedule_guard.clock import Clock, system_clock
-from schedule_guard.guard import Outcome, Progress, Update, decide, target_uid
+from schedule_guard.guard import Outcome, Update, decide, target_uid
 from schedule_guard.sources.base import SourceAdapter, SourceItem, decode_json
 from schedule_guard.store.db import open_db, transaction
 
@@ -219,7 +219,7 @@ def _process(conn: sqlite3.Connection, run_id: str, update_id: int, clock: Clock
             "INSERT INTO outcome (update_id, status, reason_code, detail, run_id, decided_at, before_json, after_json)"
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (update_id, outcome.status, outcome.reason, outcome.detail, run_id, _stamp(clock),
-             _progress_json(outcome.before), _progress_json(outcome.after)),
+             *_before_and_after(outcome)),
         )
         if outcome.status == "conflict":
             conn.execute(
@@ -248,8 +248,23 @@ def _text(value: object) -> str | None:
     return value if isinstance(value, str) else None
 
 
-def _progress_json(value: Progress | None) -> str | None:
-    return None if value is None else json.dumps(asdict(value))
+def _before_and_after(outcome: Outcome) -> tuple[str | None, str | None]:
+    """An applied outcome's progress before and after, as stored: without the task's notes.
+
+    Both hold the version and the other four progress fields. after_json
+    also holds `notes_entry`, the entry the update appended to the notes, or
+    None if it had no note. So n notes updates to one task store note text
+    in proportion to n, not n squared; task_progress holds the whole notes.
+    """
+    if outcome.before is None:
+        return None, None
+    before, after = asdict(outcome.before), asdict(outcome.after)
+    old, new = before.pop("notes"), after.pop("notes")
+    if new == old:
+        entry = None
+    else:  # the guard appends a note as a new line and never replaces the notes (Q3)
+        entry = new[len(old) + 1:] if old else new
+    return json.dumps(before), json.dumps({**after, "notes_entry": entry})
 
 
 def _stamp(clock: Clock) -> str:

@@ -193,8 +193,8 @@ CREATE TABLE outcome (
     detail      TEXT,
     run_id      TEXT NOT NULL,
     decided_at  TEXT NOT NULL,
-    before_json TEXT,                           -- an applied update's task progress, before and after
-    after_json  TEXT
+    before_json TEXT,                           -- an applied update's task progress, before and after, without
+    after_json  TEXT                            -- the notes; after_json's notes_entry is the entry it appended
 );
 
 CREATE TABLE conflict (

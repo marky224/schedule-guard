@@ -131,6 +131,47 @@ def test_an_item_without_a_usable_submitted_at_is_malformed(fixture_db, tmp_path
     assert outcomes(fixture_db) == {"u-000": ("conflict", "malformed"), "u-001": ("applied", None)}
 
 
+def test_an_applied_outcome_keeps_the_note_entry_it_appended_not_the_tasks_notes(fixture_db, tmp_path):
+    source = write(
+        tmp_path,
+        line("u-001", fields={"notes": "Fence up"}),
+        line("u-002", made_against_version=1, fields={"notes": "Gate hung", "percent_complete": 30}),
+        line("u-003", made_against_version=2, fields={"percent_complete": 40}),
+    )
+    assert sync(fixture_db, source, clock=CLOCK).applied == 3
+    with closing(open_db(fixture_db)) as conn:
+        stored = [(json.loads(b), json.loads(a)) for b, a in conn.execute(
+            "SELECT before_json, after_json FROM outcome ORDER BY update_id"
+        )]
+        (notes,) = conn.execute("SELECT notes FROM task_progress WHERE task_uid = 3").fetchone()
+    progress = {"percent_complete": 0, "actual_start": None, "actual_finish": None, "remaining_work": "PT96H0M0S"}
+    assert stored[1] == (  # no copy of "Fence up": only the entry this update appended
+        {"version": 1, **progress},
+        {"version": 2, **progress, "percent_complete": 30, "notes_entry": "[2026-10-26, file, Site lead (demo)] Gate hung"},
+    )
+    assert stored[2][1] == {"version": 3, **progress, "percent_complete": 40, "notes_entry": None}
+    assert notes == "[2026-10-26, file, Site lead (demo)] Fence up\n[2026-10-26, file, Site lead (demo)] Gate hung"
+
+
+def stored_before_and_after(db, tmp_path, k: int) -> int:
+    """Sync k notes updates to one task, each made against the version the one before left; the outcome text."""
+    tmp_path.mkdir()
+    lines = [line(f"n-{i:04}", made_against_version=i, fields={"notes": ""}) for i in range(k)]
+    assert sync(db, write(tmp_path, *lines), clock=CLOCK).applied == k
+    with closing(open_db(db)) as conn:
+        (notes,) = conn.execute("SELECT notes FROM task_progress WHERE task_uid = 3").fetchone()
+        assert notes == "\n".join(["[2026-10-26, file, Site lead (demo)] "] * k)  # the task keeps every entry
+        return conn.execute("SELECT sum(length(before_json) + length(after_json)) FROM outcome").fetchone()[0]
+
+
+def test_the_stored_outcomes_grow_in_proportion_to_the_notes_updates(fresh_db, tmp_path):
+    # Holding the task's whole notes before and after, k updates would store about k squared entries.
+    k = 20
+    once = stored_before_and_after(fresh_db(), tmp_path / "k", k)
+    twice = stored_before_and_after(fresh_db(), tmp_path / "2k", 2 * k)
+    assert twice <= 2.1 * once, (once, twice)
+
+
 def test_a_key_given_twice_in_one_run_is_decided_once_on_its_first_content(fixture_db, tmp_path):
     source = write(tmp_path, line("u-001", fields={"percent_complete": 25}), line("u-001", fields={"percent_complete": 90}))
     result = sync(fixture_db, source, clock=CLOCK)
