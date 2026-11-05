@@ -11,8 +11,10 @@ import selectors
 import shutil
 import signal
 import subprocess
+import sys
 import sysconfig
 import time
+import types
 import warnings
 from contextlib import closing
 from datetime import UTC, datetime
@@ -22,7 +24,7 @@ import pytest
 import uvicorn
 
 from schedule_guard import cli
-from schedule_guard.baselines import rebaseline
+from schedule_guard.baselines import lock_baseline, rebaseline
 from schedule_guard.clock import fixed_clock
 from schedule_guard.importer import import_file
 from schedule_guard.report.app import CSP, PAGES, create_app, server
@@ -313,6 +315,9 @@ def test_variance_uses_the_newest_baseline_rebaseline_added_else_baseline_0(tmp_
     # Baseline 0 is the one the file tracks; Baseline 3 is an older archive in a higher slot.
     db = project_db(tmp_path, task(1, "Framing", "2026-10-10T17:00:00",
                                    baselines={0: "2026-10-08T17:00:00", 3: "2026-10-05T17:00:00"}))
+    with closing(open_db(db)) as conn:  # locked or not, an imported baseline in a higher slot is never used
+        lock_baseline(conn, 0, now=IMPORTED)
+        lock_baseline(conn, 3, now=IMPORTED)
     assert variance(db) == [("0", "2026-10-08T17:00:00", "+2 d")]  # not baseline 3's +5 d
     with closing(open_db(db)) as conn:
         assert rebaseline(conn, confirm=True, reason="Owner approved the new dates", now=IMPORTED) == 4
@@ -375,36 +380,70 @@ def test_a_get_of_every_route_leaves_the_database_file_byte_identical(week_44):
 STOP_SIGNALS = [signal.SIGINT, signal.SIGTERM, signal.SIGHUP]
 
 
+def start_with(sighup: signal.Handlers = signal.SIG_DFL) -> None:
+    """In the child, before exec: SIGINT at its default handler, as a terminal's Ctrl+C finds it, and SIGHUP as given.
+
+    So the tests see the same thing when they run with either one ignored (a background job, nohup).
+    """
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    signal.signal(signal.SIGHUP, sighup)
+
+
+def read_until(process: subprocess.Popen, pattern: bytes) -> tuple[re.Match | None, bytes]:
+    """Read the child's stderr until `pattern` shows; the match is None if it ended or a minute passed first."""
+    err = b""
+    deadline = time.monotonic() + 60
+    with selectors.DefaultSelector() as selector:
+        selector.register(process.stderr, selectors.EVENT_READ)
+        while not (found := re.search(pattern, err)):
+            chunk = os.read(process.stderr.fileno(), 65536) if selector.select(deadline - time.monotonic()) else b""
+            if not chunk:
+                return None, err
+            err += chunk
+    return found, err
+
+
 class Served:
     """The installed schedule-guard with `args` and --port 0, once it listens and has served one GET of /.
 
-    The child starts with SIGINT at its default handler, as a terminal's Ctrl+C finds it, even when
-    the tests run with SIGINT ignored (a background job). Waiting reads the line uvicorn logs once
-    its socket listens, so nothing sleeps.
+    Waiting reads the line uvicorn logs once its socket listens, so nothing sleeps.
     """
 
-    def __init__(self, *args: str, env: dict[str, str] | None = None):
+    def __init__(self, *args: str, env: dict[str, str] | None = None, sighup: signal.Handlers = signal.SIG_DFL):
         script = shutil.which("schedule-guard", path=sysconfig.get_path("scripts"))
         assert script, "schedule-guard console script is not installed"
         self.process = subprocess.Popen(
             [script, *args, "--port", "0"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env,
-            preexec_fn=functools.partial(signal.signal, signal.SIGINT, signal.SIG_DFL),
+            preexec_fn=functools.partial(start_with, sighup),
         )
-        self.err = b""
-        deadline = time.monotonic() + 60
-        with selectors.DefaultSelector() as selector:
-            selector.register(self.process.stderr, selectors.EVENT_READ)
-            while not (found := re.search(rb"Uvicorn running on http://127\.0\.0\.1:(\d+)", self.err)):
-                chunk = os.read(self.process.stderr.fileno(), 65536) if selector.select(deadline - time.monotonic()) else b""
-                if not chunk:  # it ended, or never listened within the minute
-                    self.process.kill()
-                    pytest.fail(f"schedule-guard {' '.join(args)} never listened: {self.stop(signal.SIGKILL)}")
-                self.err += chunk
+        found, self.err = read_until(self.process, rb"Uvicorn running on http://127\.0\.0\.1:(\d+)")
+        if found is None:
+            self.process.kill()
+            pytest.fail(f"schedule-guard {' '.join(args)} never listened: {self.stop(signal.SIGKILL)}")
         self.port = int(found[1])
+        try:
+            status = self.get()
+        except Exception as exc:
+            status = repr(exc)
+        if status != 200:
+            self.process.kill()
+            pytest.fail(f"schedule-guard {' '.join(args)} answered GET / with {status}: {self.stop(signal.SIGKILL)}")
+
+    def __enter__(self) -> "Served":
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        self.process.kill()  # no-op once it has ended; a failed assert must not leave a server running
+        self.process.wait()
+
+    def get(self) -> int:
+        """GET / on a new connection; return the status."""
         connection = http.client.HTTPConnection("127.0.0.1", self.port, timeout=60)
-        connection.request("GET", "/")
-        assert connection.getresponse().status == 200
-        connection.close()
+        try:
+            connection.request("GET", "/")
+            return connection.getresponse().status
+        finally:
+            connection.close()
 
     def stop(self, signum: int) -> tuple[int, str]:
         """Send `signum`; return the exit code and all of stderr once it ends."""
@@ -423,3 +462,122 @@ def test_cli_report_stops_on_ctrl_c_sigterm_or_sighup_with_exit_0_and_no_traceba
     assert code == 0, err
     assert "Traceback" not in err and "KeyboardInterrupt" not in err, err
     assert "Finished server process" in err  # uvicorn shut down on its own, not killed
+
+
+@pytest.mark.parametrize("command", ["report", "demo"])
+def test_cli_keeps_serving_after_a_sighup_it_started_with_ignored(week_44, tmp_path, command):
+    args = ["report", "--db", str(week_44)] if command == "report" else ["demo", "--db", str(tmp_path / "demo.db")]
+    with Served(*args, sighup=signal.SIG_IGN) as served:
+        status = Path(f"/proc/{served.process.pid}/status").read_text()
+        sighup_bit = 1 << (signal.SIGHUP - 1)
+        assert int(re.search(r"SigIgn:\s*(\w+)", status)[1], 16) & sighup_bit  # no handler took it, so nothing races
+        served.process.send_signal(signal.SIGHUP)
+        assert served.get() == 200
+        code, err = served.stop(signal.SIGINT)
+    assert code == 0 and "Traceback" not in err, err
+    assert "Finished server process" in err
+
+
+# A child that runs cli.main up to a point before the server listens and waits there, so a signal can't land too late.
+
+WAIT_IN = """
+import sys
+import time
+from schedule_guard import cli
+
+
+def wait(*args, **kwargs):
+    print("waiting", file=sys.stderr, flush=True)
+    while True:
+        time.sleep(0.01)
+
+
+class WaitOnImport:
+    def find_spec(self, name, path=None, target=None):
+        if name == "schedule_guard.report.app":
+            wait()
+
+
+match sys.argv[1]:
+    case "build":
+        cli.build_demo = wait
+    case "import":
+        sys.meta_path.insert(0, WaitOnImport())
+    case "create_app":
+        from schedule_guard.report import app
+        app.create_app = wait
+raise SystemExit(cli.main(sys.argv[2:]))
+"""
+BEFORE_LISTENING = [("report", "import"), ("report", "create_app"), ("demo", "build"), ("demo", "import"),
+                    ("demo", "create_app")]
+
+
+@pytest.mark.parametrize("signum", STOP_SIGNALS, ids=lambda signum: signum.name)
+@pytest.mark.parametrize(("command", "point"), BEFORE_LISTENING)
+def test_cli_stopped_before_it_listens_prints_one_line_and_exits_130(week_44, tmp_path, command, point, signum):
+    scratch = tmp_path / "scratch"
+    scratch.mkdir()
+    args = ["report", "--db", str(week_44)] if command == "report" else ["demo"]
+    child = subprocess.Popen(
+        [sys.executable, "-c", WAIT_IN, point, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env={**os.environ, "TMPDIR": str(scratch)}, preexec_fn=start_with,
+    )
+    try:
+        found, before = read_until(child, rb"waiting\n")
+        assert found, before
+        assert before == b"waiting\n"  # and uvicorn has logged nothing, so it hasn't started
+        if command == "demo":
+            (directory,) = scratch.iterdir()
+            assert directory.name.startswith("schedule-guard-demo-")
+        child.send_signal(signum)
+        _, err = child.communicate(timeout=60)
+    finally:
+        child.kill()
+    assert child.returncode == 130, err
+    assert err == b"schedule-guard: stopped before the report started serving\n"
+    assert list(scratch.iterdir()) == []  # the demo's directory is gone
+
+
+@pytest.mark.parametrize(("started", "code"), [(True, 0), (False, 130)], ids=["listened", "never-listened"])
+def test_cli_report_exits_0_only_if_the_server_listened(week_44, monkeypatch, capsys, started, code):
+    def run(self, sockets=None):
+        self.started = started
+        raise KeyboardInterrupt  # what uvicorn's run raises after a stop signal
+
+    monkeypatch.setattr(uvicorn.Server, "run", run)
+    handlers = signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGHUP)
+    assert cli.main(["report", "--db", str(week_44)]) == code
+    assert capsys.readouterr().err.count("stopped before") == (0 if started else 1)
+    assert (signal.getsignal(signal.SIGTERM), signal.getsignal(signal.SIGHUP)) == handlers  # put back
+
+
+@pytest.mark.parametrize("first_get", ["not-200", "raises"])
+def test_served_kills_its_child_when_the_first_get_fails(week_44, monkeypatch, first_get):
+    children = []
+    real_popen = subprocess.Popen
+
+    def popen(*args, **kwargs):
+        children.append(real_popen(*args, **kwargs))
+        return children[-1]
+
+    def get_response(self):
+        if first_get == "raises":
+            raise ConnectionResetError("the server hung up")
+        return types.SimpleNamespace(status=500)
+
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    monkeypatch.setattr(http.client.HTTPConnection, "getresponse", get_response)
+    try:
+        with pytest.raises((pytest.fail.Exception, AssertionError, ConnectionResetError)):
+            Served("report", "--db", str(week_44))
+        assert children[0].poll() == -signal.SIGKILL
+    finally:
+        children[0].kill()
+        children[0].communicate()
+
+
+def test_served_kills_its_child_when_a_test_fails_inside_it(week_44):
+    with pytest.raises(AssertionError):
+        with Served("report", "--db", str(week_44)) as served:
+            raise AssertionError
+    assert served.process.poll() == -signal.SIGKILL

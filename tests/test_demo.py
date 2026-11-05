@@ -96,10 +96,10 @@ def test_cli_demo_without_db_builds_in_a_temporary_directory_it_removes(tmp_path
 
 @pytest.mark.parametrize("signum", STOP_SIGNALS, ids=lambda signum: signum.name)
 def test_cli_demo_without_db_stops_on_ctrl_c_sigterm_or_sighup_and_removes_its_directory(tmp_path, signum):
-    served = Served("demo", env={**os.environ, "TMPDIR": str(tmp_path)})
-    (scratch,) = tmp_path.iterdir()  # while the report is served
-    assert scratch.name.startswith("schedule-guard-demo-") and (scratch / "demo.db").is_file()
-    code, err = served.stop(signum)
+    with Served("demo", env={**os.environ, "TMPDIR": str(tmp_path)}) as served:
+        (scratch,) = tmp_path.iterdir()  # while the report is served
+        assert scratch.name.startswith("schedule-guard-demo-") and (scratch / "demo.db").is_file()
+        code, err = served.stop(signum)
     assert code == 0, err
     assert "Traceback" not in err and "KeyboardInterrupt" not in err, err
     assert "Finished server process" in err

@@ -127,7 +127,7 @@ CLI (Phase 1):
 | `schedule-guard sync daily --db <path> --source file:<path>` | Same as `sync now`, labelled `daily`. The timer calls this one. |
 | `schedule-guard rerun --db <path> <run-id>` | Reprocesses the source items that run captured. Keys already decided count as duplicates. Records a new run with `rerun_of`. Refuses a run that captured nothing. |
 | `schedule-guard runs list --db <path>` / `conflicts list --db <path> [--all]` / `conflicts dismiss --db <path> <id> --note "..."` | Inspect runs and conflicts. Dismiss a conflict with a note; it is never applied. |
-| `schedule-guard report --db <path> [--port 8000]` | Serves the read-only HTML report on 127.0.0.1 only. Ctrl+C, SIGTERM or SIGHUP stops it with exit 0. |
+| `schedule-guard report --db <path> [--port 8000]` | Serves the read-only HTML report on 127.0.0.1 only. Ctrl+C, SIGTERM or SIGHUP stops it: exit 0 once it listens, 130 before. |
 | `schedule-guard demo [--db <path>] [--port 8000]` | Builds a new demo DB from the fixture and scripted updates (some applied, some conflicts), then serves the report on it. The path must not exist; without `--db` the DB lives in a temporary directory, removed when the demo stops on Ctrl+C, SIGTERM or SIGHUP (a SIGKILL leaves it). |
 | `schedule-guard export <out.xml>` | Phase 2 (offline). Writes MSPDI with progress applied and the baseline untouched. |
 
@@ -230,7 +230,7 @@ sync_run(id TEXT PK,                         -- UUID4
          status CHECK(status IN ('running','ok','failed','interrupted')),
          seen, applied, conflicts, duplicates, error)
     interrupted: left running by a killed run, marked by the next run to
-    start (it holds the lock, so no other run is alive). A live run can be
+    start, which holds the lock. A live run can be
     marked too, and then ends ok or failed, if the next run takes another
     lock file: through a hard link to the DB file (section 5), or after the
     lock file was deleted or the DB renamed while the live run held it
@@ -393,10 +393,14 @@ Rules that hold no matter which check fires:
   POST/PUT/PATCH/DELETE return 405, that a foreign Host gets 400, that a
   task name and a note holding `<script>` are escaped, and that a GET of
   every route leaves the DB file byte-identical.
-- Stopping: Ctrl+C, SIGTERM or SIGHUP stops `report` and `demo` with exit
-  0 and no traceback, once uvicorn has shut down, and the demo's
-  temporary directory (no `--db`) is removed then. A SIGKILL can't be
-  caught and leaves the directory in the system's temporary directory.
+- Stopping: Ctrl+C, SIGTERM or SIGHUP stops `report` and `demo`. Once the
+  server listens, that is exit 0 and no traceback, after uvicorn has shut
+  down. Before it listens (the demo build, the FastAPI and uvicorn import,
+  `create_app`), that is one line on stderr and exit 130. Either way the
+  demo's temporary directory (no `--db`) is removed then. A SIGHUP that was
+  already ignored (nohup) stays ignored, so the server keeps running. A
+  SIGKILL can't be caught and leaves the directory in the system's
+  temporary directory.
 - `demo` writes a new DB from the fixture plus `demo-updates.jsonl` (fake
   "(demo)" crews), never into an existing file, with a fixed demo clock.
   The result has applied progress, overdue tasks, two reached milestones and
@@ -646,7 +650,7 @@ run.
 | M2 | SQLite schema + read-only triggers + `import`, `baseline lock`, `rebaseline --confirm`. | M | Trigger tests with the default `recursive_triggers = OFF`: direct UPDATE/DELETE on `project`, `task`, `baseline` and `baseline_task` rows raises (except the one-time `import_finished_at` set and the lock, and each of those two raises when paired with a change to any other column, including an `UPDATE OR REPLACE` renumber); INSERT OR REPLACE with an existing key raises on all four tables; INSERT OR REPLACE with an explicit rowid ("table <t> has no column named rowid") and UPDATE OR REPLACE SET rowid ("no such column: rowid") fail on all four (WITHOUT ROWID), and a schema check finds `wr` = 1 in `PRAGMA table_list` for the four tables and that every `PRAGMA index_list` row with `unique` = 1 has origin `pk`; INSERT into a locked or missing baseline, or into `task` after import or for a missing project, raises, and so does a second `project` row or a `baseline` row inserted locked or numbered outside 0–10. Import round-trip of C14N bytes. |
 | M3 | Guard engine (pure) with rules G0–G7 + unit tests + P1, P2, P4, P5 + teeth test. | M | Property tests pass. The broken applier makes P1/P2 fail. |
 | M4 | `SourceAdapter` + file source + `sync now`/`daily`, run records, lock file, `rerun`, `runs`/`conflicts` CLI + P3, P6 + state machine. | L | All properties are green. Crash-and-rerun test. |
-| M5 | Read-only FastAPI report + `demo`. Screenshots taken with the `run` skill or by the repo owner. | M | Report tests (405s, escaping, overdue with fixed today). `demo` serves. |
+| M5 | Read-only FastAPI report + `demo`. Screenshots taken with the `run` skill or by the repo owner. | M | Report tests (405s, foreign Host 400, escaping, overdue with fixed today, stop signals: exit 0 once listening, 130 before). `demo` serves. |
 | M6 | Phase 1 wrap: README "Phase 1" section, hygiene test, docs sync, GitHub Actions workflow running `uv run pytest -q` (Q15; the CI config gets a max-effort review). | S | Full suite green locally and in CI. Hygiene test passes. |
 
 **Phase 2: tenant integration** (M7 needs no tenant; M8 is the tenant admin's

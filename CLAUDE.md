@@ -24,8 +24,9 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
   127.0.0.1 only, and only a Host of 127.0.0.1 or localhost);
   `uv run schedule-guard demo [--db <new path>]` builds a demo database from
   the fixture and serves the report on it; Ctrl+C, SIGTERM or SIGHUP stops
-  either with exit 0 (the demo's temporary directory, with no `--db`, goes
-  then; a SIGKILL leaves it)
+  either: exit 0 once it listens, one line and exit 130 before (the demo's
+  temporary directory, with no `--db`, goes then; a SIGKILL leaves it; under
+  nohup a SIGHUP stays ignored)
 - Test all: `uv run pytest -q` (Hypothesis is derandomized: the same examples every run)
 - Test one: `uv run pytest -q tests/test_smoke.py::test_cli_version_prints_package_version`
 - Regenerate the MSPDI fixture: `uv run python scripts/make_fixture.py`

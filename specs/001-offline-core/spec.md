@@ -172,8 +172,10 @@ or any baseline.
   "(demo)" crews, with Baseline 0 locked and a fixed demo clock
   (2026-10-30 in Chicago): applied progress, overdue tasks, two reached
   milestones and open conflicts of seven kinds. Then it serves the report.
-  Ctrl+C, SIGTERM or SIGHUP stops `report` or `demo` with exit 0 and no
-  traceback once uvicorn has shut down.
+  Ctrl+C, SIGTERM or SIGHUP stops `report` or `demo`: exit 0 and no
+  traceback once it listens and uvicorn has shut down, one line on stderr
+  and exit 130 before it listens. A SIGHUP that was already ignored (nohup)
+  stays ignored.
 - **US6 Hygiene and CI (M6).** A test scans tracked files for GUID-shaped
   strings outside an explicit fixture allowlist, tenant or secret
   assignments, and key files. A GitHub Actions workflow runs
@@ -282,7 +284,9 @@ or any baseline.
   ok with every line decided.
 - M5: POST/PUT/PATCH/DELETE return 405 on every route; a `<script>` task
   name and note are escaped; the database file is byte-identical after a
-  GET of every route; the report binds 127.0.0.1; overdue
+  GET of every route; the report binds 127.0.0.1; a foreign Host gets 400
+  on every route; Ctrl+C, SIGTERM and SIGHUP stop `report` and `demo` with
+  exit 0 once they listen and exit 130 before; overdue
   is correct for a fixed today; `demo` serves a page with every section
   populated.
 - M6: the hygiene test passes on the repo and fails on a planted GUID in a
