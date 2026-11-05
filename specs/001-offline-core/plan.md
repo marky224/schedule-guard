@@ -62,7 +62,8 @@
 6. M6 README + hygiene + CI → verify: suite green locally and in CI.
 
 ## Tests / oracle
-- Command: `uv run pytest -q` (offline; deps from `uv.lock`).
+- Command: `uv run pytest -q` (offline; deps from `uv.lock`). CI runs
+  `uv run --locked pytest -q` and downloads the locked packages.
 - Cases: the spec's Acceptance list. Hypothesis runs on a temp-file SQLite DB
   built from the fixture; the teeth test monkeypatches the applier to write
   `planned_finish` or a baseline field and expects P1/P2 to fail.

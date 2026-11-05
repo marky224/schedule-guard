@@ -43,9 +43,9 @@ Format: `- [ ] T000 [P?] [USn] Description (path)`
 - [x] T051 [US5] `demo` command and scripted updates (`src/schedule_guard/demo.py`, `tests/fixtures/demo-updates.jsonl`)
 - [x] T052 [P] [US5] Report tests: 405s, escaping, overdue with fixed today (`tests/test_report.py`)
 ### M6: wrap-up
-- [ ] T060 [US6] Hygiene test with fixture GUID allowlist (`tests/test_hygiene.py`)
-- [ ] T061 [US6] GitHub Actions running `uv run pytest -q`; max-effort review of the config (Q15) (`.github/workflows/ci.yml`)
-- [ ] T062 [US6] README Phase 1 section (`README.md`)
+- [x] T060 [US6] Hygiene test with fixture GUID allowlist (`tests/test_hygiene.py`)
+- [x] T061 [US6] GitHub Actions running `uv run --locked pytest -q`; max-effort review of the config (Q15) (`.github/workflows/ci.yml`)
+- [x] T062 [US6] README Phase 1 section (`README.md`)
 
 ## Verify
 - [ ] T070 Run proof command `uv run pytest -q` after each milestone

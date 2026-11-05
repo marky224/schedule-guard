@@ -79,10 +79,12 @@ the Entra token endpoint, and the Workflows trigger URL. Nothing listens for
 inbound traffic. The report binds to `127.0.0.1` and answers only a Host
 of `127.0.0.1` or `localhost`.
 
-### Layout (`[M0]`–`[M5]` = exists since that milestone; everything else comes in later runs)
+### Layout (`[M0]`–`[M6]` = exists since that milestone; everything else comes in later runs)
 
 ```
 pyproject.toml, uv.lock              [M0] uv-managed, Python 3.12
+README.md                            [M6] Phase 1 section
+.github/workflows/ci.yml             [M6] the suite on GitHub Actions (`uv run --locked pytest -q`), actions pinned by commit SHA
 CLAUDE.md                            [M0] stack, commands, map, invariants
 .claude/skills/domain/               [M0] ontology, glossary
 specs/001-offline-core/              [M0] spec, plan, tasks for M1–M6
@@ -109,7 +111,7 @@ src/schedule_guard/                  [M0]
   demo.py                            [M5] builds the demo database for the report
 scripts/make_fixture.py              [M1] deterministic fixture generator
 tests/fixtures/                      [M1] generated MSPDI + update files (fake data only; `riverbend-clinic.xml`, `updates/week-44.jsonl`, `demo-updates.jsonl` so far)
-tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py`, `test_fixture.py`, `test_mspdi_parse.py`, `test_store_triggers.py`, `test_import.py`, `test_baselines.py`, `test_clock.py`, `test_guard_rules.py`, `test_progress.py`, `test_sources.py`, `test_sync.py`, `test_review.py`, `test_report.py`, `test_demo.py`, `conftest.py`, `properties/` so far)
+tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py`, `test_fixture.py`, `test_mspdi_parse.py`, `test_store_triggers.py`, `test_import.py`, `test_baselines.py`, `test_clock.py`, `test_guard_rules.py`, `test_progress.py`, `test_sources.py`, `test_sync.py`, `test_review.py`, `test_report.py`, `test_demo.py`, `test_hygiene.py`, `conftest.py`, `properties/` so far)
 deploy/systemd/                      user .service + .timer (Phase 2)
 docs/tenant-setup.md                 Phase 2 runbook for the tenant admin
 docs/spike-graph-selected.md         Phase 2 spike results
@@ -651,7 +653,7 @@ run.
 | M3 | Guard engine (pure) with rules G0–G7 + unit tests + P1, P2, P4, P5 + teeth test. | M | Property tests pass. The broken applier makes P1/P2 fail. |
 | M4 | `SourceAdapter` + file source + `sync now`/`daily`, run records, lock file, `rerun`, `runs`/`conflicts` CLI + P3, P6 + state machine. | L | All properties are green. Crash-and-rerun test. |
 | M5 | Read-only FastAPI report + `demo`. Screenshots taken with the `run` skill or by the repo owner. | M | Report tests (405s, foreign Host 400, escaping, overdue with fixed today, stop signals: exit 0 once listening, 130 before). `demo` serves. |
-| M6 | Phase 1 wrap: README "Phase 1" section, hygiene test, docs sync, GitHub Actions workflow running `uv run pytest -q` (Q15; the CI config gets a max-effort review). | S | Full suite green locally and in CI. Hygiene test passes. |
+| M6 | Phase 1 wrap: README "Phase 1" section, hygiene test, docs sync, GitHub Actions workflow running `uv run --locked pytest -q` (Q15; the CI config gets a max-effort review). **Done 2026-11-04;** "in CI" waits for the first push. | S | Full suite green locally and in CI. Hygiene test passes. |
 
 **Phase 2: tenant integration** (M7 needs no tenant; M8 is the tenant admin's
 work; M9 needs the repo owner's go-ahead for live calls)

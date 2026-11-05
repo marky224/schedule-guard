@@ -1,8 +1,8 @@
 # Spec: 001 offline core (PLAN.md milestones M1–M6)
 
 Status: derived from the approved PLAN.md (approved 2026-10-23); M1 done
-2026-10-29, M2, M3 and M4 done 2026-10-30, M5 done 2026-11-01, M6 not
-started.
+2026-10-29, M2, M3 and M4 done 2026-10-30, M5 done 2026-11-01, M6 done
+2026-11-04 (CI's first run on GitHub comes with the first push).
 Source plan: [PLAN.md](../../PLAN.md) §1–8, §11. Terms: `.claude/skills/domain/`.
 
 ## Problem
@@ -24,7 +24,7 @@ or any baseline.
   `conflicts dismiss`, properties P3 and P6, a stateful test.
 - M5: read-only FastAPI HTML report and `demo`.
 - M6: README Phase 1 section, public-repo hygiene test, GitHub Actions CI
-  running `uv run pytest -q`.
+  running `uv run --locked pytest -q`.
 
 ## Out of scope
 - Microsoft Graph, tenant access, alerts, systemd units (Phase 2).
@@ -179,7 +179,8 @@ or any baseline.
 - **US6 Hygiene and CI (M6).** A test scans tracked files for GUID-shaped
   strings outside an explicit fixture allowlist, tenant or secret
   assignments, and key files. A GitHub Actions workflow runs
-  `uv run pytest -q` (Q15); its config gets a max-effort review.
+  `uv run --locked pytest -q` (Q15), so a stale `uv.lock` fails it; its
+  config gets a max-effort review.
 
 ## Edge cases / failures
 - Billion-laughs, XXE file read, external DTD, oversize file, wrong root or

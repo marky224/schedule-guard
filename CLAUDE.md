@@ -46,7 +46,8 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
   `demo.py` the demo database)
 - tests/ — oracles (smoke, fixture, MSPDI parser, store trigger, import,
   baseline, clock, guard rule, applier, source, sync, review, report and
-  demo tests;
+  demo tests; `test_hygiene.py` scans tracked files for GUIDs, tenant or
+  secret assignments and key files;
   `conftest.py` shared fixtures and the Hypothesis profile)
 - tests/properties/ — Hypothesis P1–P6 on the sync engine, a property that
   no line stops a run, the state machine and the teeth test (`harness.py`
@@ -54,6 +55,8 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 - tests/fixtures/ — generated, fictional inputs (`riverbend-clinic.xml`,
   `updates/week-44.jsonl`, `demo-updates.jsonl`)
 - scripts/ — `make_fixture.py`, the seeded fixture generator
+- .github/workflows/ — `ci.yml` runs `uv run --locked pytest -q` on push and
+  pull_request, least privilege, actions pinned by full commit SHA
 - specs/001-offline-core/ — spec.md, plan.md, tasks.md for M1–M6
 - .claude/skills/domain/ — ontology, glossary (present)
 - PLAN.md — architecture, guard rules, milestones, decisions (§15), sources
