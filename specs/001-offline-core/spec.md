@@ -2,7 +2,7 @@
 
 Status: derived from the approved PLAN.md (approved 2026-10-23); M1 done
 2026-10-29, M2, M3 and M4 done 2026-10-30, M5 done 2026-11-01, M6 done
-2026-11-04 (CI's first run on GitHub comes with the first push).
+2026-11-04 (its first CI run on GitHub, on PR #1, passed on 2026-11-08).
 Source plan: [PLAN.md](../../PLAN.md) §1–8, §11. Terms: `.claude/skills/domain/`.
 
 ## Problem
@@ -174,8 +174,11 @@ or any baseline.
   milestones and open conflicts of seven kinds. Then it serves the report.
   Ctrl+C, SIGTERM or SIGHUP stops `report` or `demo`: exit 0 and no
   traceback once it listens and uvicorn has shut down, one line on stderr
-  and exit 130 before it listens. A SIGHUP that was already ignored (nohup)
-  stays ignored.
+  and exit 130 before it listens. A stop inside the FastAPI and pydantic
+  import can still print a traceback and exit 1, and a second Ctrl+C during
+  uvicorn's shutdown can still print one, or end the process by the signal;
+  the demo's temporary directory is removed either way. A SIGHUP that was
+  already ignored (nohup) stays ignored.
 - **US6 Hygiene and CI (M6).** A test scans tracked files for GUID-shaped
   strings outside an explicit fixture allowlist, tenant or secret
   assignments and XML elements (camelCase names too), PRIVATE KEY blocks,

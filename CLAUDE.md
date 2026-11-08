@@ -26,7 +26,7 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
   the fixture and serves the report on it; Ctrl+C, SIGTERM or SIGHUP stops
   either: exit 0 once it listens, one line and exit 130 before (the demo's
   temporary directory, with no `--db`, goes then; a SIGKILL leaves it; under
-  nohup a SIGHUP stays ignored)
+  nohup a SIGHUP stays ignored; two rare tracebacks: PLAN.md section 7)
 - Test all: `uv run pytest -q` (Hypothesis is derandomized: the same examples every run)
 - Test one: `uv run pytest -q tests/test_smoke.py::test_cli_version_prints_package_version`
 - Regenerate the MSPDI fixture: `uv run python scripts/make_fixture.py`

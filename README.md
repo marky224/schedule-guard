@@ -36,7 +36,9 @@ every progress update through a guard, which keeps these rules:
 
 ### Install
 
-You need [uv](https://docs.astral.sh/uv/) and Python 3.12. From a checkout of
+You need [uv](https://docs.astral.sh/uv/) and Python 3.12. Phase 1 runs on
+Linux only: the sync run lock uses `fcntl` (`src/schedule_guard/sync.py`), and
+the tests read `/proc`. Windows and macOS are not supported. From a checkout of
 this repo:
 
 ```sh
@@ -138,7 +140,10 @@ page names the number. An imported baseline with a higher number is never used.
 imported; summary tasks stay on `/tasks`, marked.
 
 Ctrl+C, SIGTERM or SIGHUP stops `report` and `demo`: exit 0 once the server
-listens, or one line on stderr and exit 130 before it does. Either way the
+listens, or one line on stderr and exit 130 before it does. Two cases can still
+print a traceback, and their exit can differ: a stop that lands inside the
+FastAPI and pydantic import (exit 1), and a second Ctrl+C while the server shuts
+down (exit 0, or an end by the signal if it comes a little later). Either way the
 demo's temporary directory is removed. A SIGKILL can't be caught and leaves it,
 and under `nohup` a SIGHUP stays ignored.
 

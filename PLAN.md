@@ -130,7 +130,7 @@ CLI (Phase 1):
 | `schedule-guard sync daily --db <path> --source file:<path>` | Same as `sync now`, labelled `daily`. The timer calls this one. |
 | `schedule-guard rerun --db <path> <run-id>` | Reprocesses the source items that run captured. Keys already decided count as duplicates. Records a new run with `rerun_of`. Refuses a run that captured nothing. |
 | `schedule-guard runs list --db <path>` / `conflicts list --db <path> [--all]` / `conflicts dismiss --db <path> <id> --note "..."` | Inspect runs and conflicts. Dismiss a conflict with a note; it is never applied. |
-| `schedule-guard report --db <path> [--port 8000]` | Serves the read-only HTML report on 127.0.0.1 only. Ctrl+C, SIGTERM or SIGHUP stops it: exit 0 once it listens, 130 before. |
+| `schedule-guard report --db <path> [--port 8000]` | Serves the read-only HTML report on 127.0.0.1 only. Ctrl+C, SIGTERM or SIGHUP stops it: exit 0 once it listens, 130 before (two rare exceptions: §7). |
 | `schedule-guard demo [--db <path>] [--port 8000]` | Builds a new demo DB from the fixture and scripted updates (some applied, some conflicts), then serves the report on it. The path must not exist; without `--db` the DB lives in a temporary directory, removed when the demo stops on Ctrl+C, SIGTERM or SIGHUP (a SIGKILL leaves it). |
 | `schedule-guard export <out.xml>` | Phase 2 (offline). Writes MSPDI with progress applied and the baseline untouched. |
 
@@ -399,7 +399,12 @@ Rules that hold no matter which check fires:
 - Stopping: Ctrl+C, SIGTERM or SIGHUP stops `report` and `demo`. Once the
   server listens, that is exit 0 and no traceback, after uvicorn has shut
   down. Before it listens (the demo build, the FastAPI and uvicorn import,
-  `create_app`), that is one line on stderr and exit 130. Either way the
+  `create_app`), that is one line on stderr and exit 130. Two cases can
+  still print a traceback, and their exit can differ: a stop that lands
+  inside the FastAPI and pydantic import (pydantic-core turns the
+  KeyboardInterrupt into its own error, so the exit is 1), and a second
+  Ctrl+C during uvicorn's shutdown (exit 0 with a traceback, or, a little
+  later, an end by the signal). Either way the
   demo's temporary directory (no `--db`) is removed then. A SIGHUP that was
   already ignored (nohup) stays ignored, so the server keeps running. A
   SIGKILL can't be caught and leaves the directory in the system's
@@ -642,7 +647,7 @@ mentions it under "next". The notes below are kept for that post.
 - It also breaks the "no public inbound endpoint" constraint, which is why it
   stays out of v1.0.
 
-## 11. Milestones (each one worker run, one PR)
+## 11. Milestones (each one worker run and one PR; Phase 1, M0–M6, went to GitHub as one PR, #1)
 
 Sizes: S ≈ small diff, M ≈ medium, L ≈ largest that still fits one reviewed
 run.
@@ -657,7 +662,7 @@ run.
 | M3 | Guard engine (pure) with rules G0–G7 + unit tests + P1, P2, P4, P5 + teeth test. | M | Property tests pass. The broken applier makes P1/P2 fail. |
 | M4 | `SourceAdapter` + file source + `sync now`/`daily`, run records, lock file, `rerun`, `runs`/`conflicts` CLI + P3, P6 + state machine. | L | All properties are green. Crash-and-rerun test. |
 | M5 | Read-only FastAPI report + `demo`. Screenshots taken with the `run` skill or by the repo owner. | M | Report tests (405s, foreign Host 400, escaping, overdue with fixed today, stop signals: exit 0 once listening, 130 before). `demo` serves. |
-| M6 | Phase 1 wrap: README "Phase 1" section, hygiene test, docs sync, GitHub Actions workflow running `uv run --locked pytest -q` (Q15; the CI config gets a max-effort review). **Done 2026-11-04;** "in CI" waits for the first push. | S | Full suite green locally and in CI. Hygiene test passes. |
+| M6 | Phase 1 wrap: README "Phase 1" section, hygiene test, docs sync, GitHub Actions workflow running `uv run --locked pytest -q` (Q15; the CI config gets a max-effort review). **Done 2026-11-04;** M0–M6 went to GitHub as one PR (#1), and "in CI" was met by its first run on fd73925 (622 passed, 2026-11-08). | S | Full suite green locally and in CI. Hygiene test passes. |
 
 **Phase 2: tenant integration** (M7 needs no tenant; M8 is the tenant admin's
 work; M9 needs the repo owner's go-ahead for live calls)

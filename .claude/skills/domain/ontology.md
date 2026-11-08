@@ -106,9 +106,11 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
   listens on 127.0.0.1 only and answers only a Host of 127.0.0.1 or
   localhost (400 for any other, so a rebound domain can't read it).
   Ctrl+C, SIGTERM or SIGHUP stops it: exit 0 once it listens, one line on
-  stderr and exit 130 before. Either way the demo's temporary directory
-  (no `--db`) goes then. A SIGHUP that was already ignored (nohup) stays
-  ignored; a SIGKILL can't be caught and leaves the directory.
+  stderr and exit 130 before (two rare cases can still print a traceback
+  and exit differently: PLAN.md section 7). Either way the demo's
+  temporary directory (no `--db`) goes then. A SIGHUP that was already
+  ignored (nohup) stays ignored; a SIGKILL can't be caught and leaves the
+  directory.
 - Phase 1 is a local CLI with no authentication: anyone with shell access to
   the host and the DB file can run every command. The roles above are
   conventions, not enforced checks. Whoever runs a command, the DB triggers
