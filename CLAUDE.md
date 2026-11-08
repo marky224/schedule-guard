@@ -55,8 +55,10 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 - tests/fixtures/ — generated, fictional inputs (`riverbend-clinic.xml`,
   `updates/week-44.jsonl`, `demo-updates.jsonl`)
 - scripts/ — `make_fixture.py`, the seeded fixture generator
-- .github/workflows/ — `ci.yml` runs `uv run --locked pytest -q` on push and
-  pull_request, least privilege, actions pinned by full commit SHA
+- .github/ — `workflows/ci.yml` runs `uv run --locked pytest -q` on pull
+  requests and pushes to main (Ubuntu 24.04, its system Python 3.12, uv
+  0.11.15), least privilege, actions pinned by full commit SHA;
+  `dependabot.yml` proposes updates to those pins monthly
 - specs/001-offline-core/ — spec.md, plan.md, tasks.md for M1–M6
 - .claude/skills/domain/ — ontology, glossary (present)
 - PLAN.md — architecture, guard rules, milestones, decisions (§15), sources

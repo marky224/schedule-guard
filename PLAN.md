@@ -84,7 +84,8 @@ of `127.0.0.1` or `localhost`.
 ```
 pyproject.toml, uv.lock              [M0] uv-managed, Python 3.12
 README.md                            [M6] Phase 1 section
-.github/workflows/ci.yml             [M6] the suite on GitHub Actions (`uv run --locked pytest -q`), actions pinned by commit SHA
+.github/workflows/ci.yml             [M6] the suite on GitHub Actions (`uv run --locked pytest -q`) for pull requests and pushes to main, on Ubuntu 24.04's Python 3.12 with uv 0.11.15; actions pinned by commit SHA
+.github/dependabot.yml               [M6] monthly update PRs for those two actions' pins (GitHub Actions only)
 CLAUDE.md                            [M0] stack, commands, map, invariants
 .claude/skills/domain/               [M0] ontology, glossary
 specs/001-offline-core/              [M0] spec, plan, tasks for M1–M6

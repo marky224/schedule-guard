@@ -148,6 +148,10 @@ and under `nohup` a SIGHUP stays ignored.
 uv run pytest -q
 ```
 
+GitHub Actions runs `uv run --locked pytest -q` on every pull request and every
+push to main, on Ubuntu 24.04 with its system Python 3.12. Dependabot proposes
+updates to the workflow's two pinned actions once a month.
+
 ### What Phase 2 adds
 
 Phase 2 is planned, not built. It connects the same guard to a Microsoft 365
