@@ -46,8 +46,9 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
   `demo.py` the demo database)
 - tests/ — oracles (smoke, fixture, MSPDI parser, store trigger, import,
   baseline, clock, guard rule, applier, source, sync, review, report and
-  demo tests; `test_hygiene.py` scans tracked files for GUIDs, tenant or
-  secret assignments and key files;
+  demo tests; `test_hygiene.py` scans tracked files, UTF-16 ones too, for
+  GUIDs, tenant or secret assignments and XML elements, private key blocks
+  and key files;
   `conftest.py` shared fixtures and the Hypothesis profile)
 - tests/properties/ — Hypothesis P1–P6 on the sync engine, a property that
   no line stops a run, the state machine and the teeth test (`harness.py`

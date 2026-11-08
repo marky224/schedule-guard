@@ -451,8 +451,11 @@ Plus:
   Each must be rejected without reading any file.
 - Fixture determinism, report escaping/405, and CLI smoke tests.
 - A public-repo hygiene test. It scans tracked files for GUID-shaped strings,
-  `tenant`/`client_secret` assignments and `.pem`/`.pfx` files. Only fixture
-  GUIDs on an explicit allowlist may pass.
+  `tenant`/`client_secret` assignments (camelCase names such as
+  azureClientSecret and aadTenantId too) and XML elements, PRIVATE KEY
+  blocks, and files with any of the seven key suffixes `.gitignore` lists. A
+  file in UTF-16 is decoded as such first. Only fixture GUIDs on an explicit
+  allowlist may pass.
 - Phase 2 Graph code is tested against recorded JSON responses (paging,
   deltaLink, 410 Gone, duplicate items in the delta feed, deleted items, 412
   on if-match). No test makes a network call.

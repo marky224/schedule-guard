@@ -1,11 +1,14 @@
-"""Public-repo hygiene (PLAN.md section 8): no tracked file holds a GUID, a tenant or secret assignment, or a key.
+"""Public-repo hygiene (PLAN.md section 8): no tracked file holds a GUID, a tenant or secret value, or a key.
 
 The scan reads what `git ls-files` lists, so it needs a git checkout: on a
-copy with no .git it errors, and can't pass without having looked. A finding
-names the file and line, never the value. The planted values below are built
-from parts, since this file is tracked too.
+copy with no .git it errors, and can't pass without having looked. A file
+that starts with a UTF-16 BOM, or whose every other byte is mostly NUL, is
+read as UTF-16 before any rule runs. A finding names the file and line, never
+the value. The planted values below are built from parts, since this file is
+tracked too.
 """
 
+import codecs
 import re
 import subprocess
 from pathlib import Path
@@ -15,13 +18,29 @@ import pytest
 REPO = Path(__file__).resolve().parent.parent
 GUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 GUID_ALLOWLIST: frozenset[str] = frozenset()  # fixture files that may hold a GUID; none does today
-ASSIGNMENT = re.compile(r"""(?<![a-z0-9])(?:tenant(?:[_-]?id)?|client[_-]?secret)["']?\s*[:=]\s*["']?[^\s"']""", re.I)
-KEY_FILES = (".pem", ".pfx")
+# A tenant or client secret name: a word of its own in any case (tenant, TENANT_ID, client-secret, clientSecret),
+# or the camelCase end of a longer name (aadTenantId, azureClientSecret). A longer word such as subtenant is neither.
+NAME = r"(?:(?<![A-Za-z0-9])(?i:tenant(?:[_-]?id)?|client[_-]?secret)|(?<=[a-z0-9])(?:Tenant(?:[_-]?I[dD])?|Client[_-]?Secret))"
+ASSIGNMENT = re.compile(NAME + r"""["']?\s*[:=]\s*["']?[^\s"']""")
+ELEMENT = re.compile(r"<(?:[\w.-]+:)?[\w.-]*?(?i:tenant(?:[_-]?id)?|client[_-]?secret)(?:\s[^>]*)?>\s*[^<\s]")
+PRIVATE_KEY = re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----")
+KEY_FILES = (".pem", ".pfx", ".p12", ".key", ".cer", ".crt", ".der")  # the suffixes .gitignore keeps out
 
 
 def tracked(root: Path) -> list[str]:
     listed = subprocess.run(["git", "ls-files", "-z"], cwd=root, capture_output=True, check=True).stdout
     return [name for name in listed.decode().split("\0") if name]
+
+
+def text(data: bytes) -> str:
+    """A file's text: UTF-16 if it starts with a UTF-16 BOM or every other byte is mostly NUL, else UTF-8."""
+    if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
+        return data.decode("utf-16", "replace")
+    for first_nul, codec in ((1, "utf-16-le"), (0, "utf-16-be")):
+        every_other = data[first_nul::2]
+        if every_other and every_other.count(0) > len(every_other) / 2:
+            return data.decode(codec, "replace")
+    return data.decode("utf-8", "replace")
 
 
 def findings(root: Path, names: list[str], guid_allowlist: frozenset[str] = GUID_ALLOWLIST) -> list[str]:
@@ -33,11 +52,15 @@ def findings(root: Path, names: list[str], guid_allowlist: frozenset[str] = GUID
         path = root / name
         if not path.is_file():  # deleted from the working tree, not yet from the index
             continue
-        for number, line in enumerate(path.read_bytes().decode("utf-8", "replace").splitlines(), 1):
+        for number, line in enumerate(text(path.read_bytes()).splitlines(), 1):
             if name not in guid_allowlist and GUID.search(line):
                 found.append(f"{name}:{number}: GUID")
             if ASSIGNMENT.search(line):
                 found.append(f"{name}:{number}: tenant or secret assignment")
+            if ELEMENT.search(line):
+                found.append(f"{name}:{number}: tenant or secret element")
+            if PRIVATE_KEY.search(line):
+                found.append(f"{name}:{number}: private key")
     return found
 
 
@@ -54,14 +77,25 @@ def test_only_fixture_files_can_be_on_the_guid_allowlist():
 PLANTED_GUID = "-".join(["0f1e2d3c", "4b5a", "6978", "8796", "a5b4c3d2e1f0"])
 SECRET_WORD = "client_" + "secret"
 TENANT_WORD = "ten" + "ant"
+SECRET_CAMEL = "Client" + "Secret"
+TENANT_CAMEL = "Tenant" + "Id"
 
 
-def git_repo(root: Path, *planted: tuple[str, str]) -> None:
-    """A real git repo at `root` with each (name, text) tracked; -f, in case a global ignore names a key file."""
+def key_header(kind: str) -> str:
+    """The first line of a PEM block of `kind`, such as "RSA PRIVATE KEY"."""
+    return "-" * 5 + "BEGIN " + kind + "-" * 5
+
+
+def git_repo(root: Path, *planted: tuple[str, str | bytes]) -> None:
+    """A real git repo at `root` with each (name, content) tracked; -f, in case a global ignore names a key file."""
     subprocess.run(["git", "init", "-q"], cwd=root, check=True)
-    for name, text in planted:
-        (root / name).parent.mkdir(parents=True, exist_ok=True)
-        (root / name).write_text(text)
+    for name, content in planted:
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(content, bytes):
+            path.write_bytes(content)
+        else:
+            path.write_text(content)
         subprocess.run(["git", "add", "-f", name], cwd=root, check=True)
 
 
@@ -75,10 +109,37 @@ def git_repo(root: Path, *planted: tuple[str, str]) -> None:
     ("settings.json", f'{{"{TENANT_WORD}Id": "abc123"}}\n', "settings.json:1: tenant or secret assignment"),
     ("app.pem", "", "app.pem: key file"),
     ("deploy/APP.PFX", "", "deploy/APP.PFX: key file"),
-], ids=["guid", "upper-guid", "secret", "env-secret", "env-tenant-id", "yaml-tenant", "json-tenant", "pem", "pfx"])
+    ("certs/app.p12", "", "certs/app.p12: key file"),
+    ("certs/app.key", "", "certs/app.key: key file"),
+    ("certs/app.cer", "", "certs/app.cer: key file"),
+    ("certs/app.crt", "", "certs/app.crt: key file"),
+    ("certs/APP.DER", "", "certs/APP.DER: key file"),
+    ("notes.txt", f"Keep this safe:\n{key_header('PRIVATE KEY')}\nMIIEvQIBADAN\n", "notes.txt:2: private key"),
+    ("notes.txt", f"{key_header('RSA PRIVATE KEY')}\n", "notes.txt:1: private key"),
+    ("notes.txt", f"{key_header('EC PRIVATE KEY')}\n", "notes.txt:1: private key"),
+    ("notes.txt", f"{key_header('OPENSSH PRIVATE KEY')}\n", "notes.txt:1: private key"),
+    ("notes.txt", f"{key_header('ENCRYPTED PRIVATE KEY')}\n", "notes.txt:1: private key"),
+    ("app.config", f"<appSettings>\n  <{SECRET_CAMEL}>abc123</{SECRET_CAMEL}>\n", "app.config:2: tenant or secret element"),
+    ("app.config", f'<{TENANT_CAMEL} kind="aad">example-org</{TENANT_CAMEL}>\n', "app.config:1: tenant or secret element"),
+    ("app.config", f"<cfg:{SECRET_CAMEL}>abc123</cfg:{SECRET_CAMEL}>\n", "app.config:1: tenant or secret element"),
+    ("notes.txt", f"The site is {PLANTED_GUID}.\n".encode("utf-16"), "notes.txt:1: GUID"),
+    ("settings.env", f"{SECRET_WORD}=abc123\n".encode("utf-16-le"), "settings.env:1: tenant or secret assignment"),
+    ("settings.env", f"{TENANT_WORD}Id=abc123\n".encode("utf-16-be"), "settings.env:1: tenant or secret assignment"),
+], ids=["guid", "upper-guid", "secret", "env-secret", "env-tenant-id", "yaml-tenant", "json-tenant", "pem", "pfx", "p12",
+        "key", "cer", "crt", "der", "private-key", "rsa-private-key", "ec-private-key", "openssh-private-key",
+        "encrypted-private-key", "xml-secret", "xml-tenant-with-attribute", "xml-namespaced-secret", "utf16-bom-guid",
+        "utf16le-secret", "utf16be-tenant-id"])
 def test_a_planted_file_in_a_git_repo_is_found(tmp_path, name, text, found):
     git_repo(tmp_path, (name, text))
     assert findings(tmp_path, tracked(tmp_path)) == [found]
+
+
+def test_camel_case_names_in_a_json_file_are_found(tmp_path):
+    settings = f'{{\n  "azure{SECRET_CAMEL}": "abc123",\n  "aad{TENANT_CAMEL}": "example-org"\n}}\n'
+    git_repo(tmp_path, ("appsettings.json", settings))
+    assert findings(tmp_path, tracked(tmp_path)) == [
+        "appsettings.json:2: tenant or secret assignment", "appsettings.json:3: tenant or secret assignment",
+    ]
 
 
 def test_a_finding_never_prints_the_value(tmp_path):
@@ -103,7 +164,12 @@ def test_a_file_that_isnt_tracked_is_not_scanned(tmp_path):
     f'{SECRET_WORD} = ""',
     f"subgraph {TENANT_WORD}[{TENANT_WORD.capitalize()} (Phase 2)]",
     "subtenant = abc",
-], ids=["prose", "prose-capital", "names-in-backticks", "empty-env", "empty-string", "mermaid", "longer-word"])
+    "SUBTENANT = abc",
+    f"The {TENANT_CAMEL} column is filled in by the {TENANT_WORD} admin.",
+    f"<{SECRET_CAMEL}></{SECRET_CAMEL}>",
+    f"<{SECRET_CAMEL}/>",
+], ids=["prose", "prose-capital", "names-in-backticks", "empty-env", "empty-string", "mermaid", "longer-word",
+        "longer-word-upper", "camel-in-prose", "empty-element", "self-closing-element"])
 def test_a_mention_or_an_empty_value_is_not_an_assignment(tmp_path, line):
     git_repo(tmp_path, ("notes.md", f"{line}\n"))
     assert findings(tmp_path, tracked(tmp_path)) == []
@@ -113,3 +179,9 @@ def test_a_guid_passes_only_in_a_file_on_the_allowlist(tmp_path):
     fixture = "tests/fixtures/updates.jsonl"
     git_repo(tmp_path, (fixture, f"{PLANTED_GUID}\n"), ("other.jsonl", f"{PLANTED_GUID}\n"))
     assert findings(tmp_path, tracked(tmp_path), frozenset({fixture})) == ["other.jsonl:1: GUID"]
+
+
+@pytest.mark.parametrize("kind", ["PUBLIC KEY", "CERTIFICATE"])
+def test_a_public_key_or_certificate_block_is_not_a_private_key(tmp_path, kind):
+    git_repo(tmp_path, ("notes.txt", f"{key_header(kind)}\nMIIBIjANBgkq\n"))
+    assert findings(tmp_path, tracked(tmp_path)) == []
