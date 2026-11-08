@@ -182,9 +182,10 @@ or any baseline.
   exit 1. A SIGHUP that was already ignored (nohup) stays ignored.
 - **US6 Hygiene and CI (M6).** A test scans tracked files for GUID-shaped
   strings outside an explicit fixture allowlist, tenant or secret
-  assignments and XML elements (camelCase names too), PRIVATE KEY blocks,
-  and key files (the seven suffixes `.gitignore` lists); a UTF-16 file is
-  decoded as such first. A GitHub Actions workflow runs
+  assignments, appSettings key and value pairs and XML elements with a value
+  and a closing tag (camelCase and acronym-prefixed names too), PRIVATE KEY
+  blocks (PGP ones too), and key files (the seven suffixes `.gitignore`
+  lists); a UTF-16 file is decoded as such first, and a NUL-padded one isn't. A GitHub Actions workflow runs
   `uv run --locked pytest -q` (Q15), so a stale `uv.lock` fails it; its
   config gets a max-effort review.
 

@@ -2,8 +2,8 @@
 
 The scan reads what `git ls-files` lists, so it needs a git checkout: on a
 copy with no .git it errors, and can't pass without having looked. A file
-that starts with a UTF-16 BOM, or whose every other byte is mostly NUL, is
-read as UTF-16 before any rule runs. A finding names the file and line, never
+that starts with a UTF-16 BOM, or whose bytes alternate between mostly NUL
+and mostly not, is read as UTF-16 before any rule runs. A finding names the file and line, never
 the value. The planted values below are built from parts, since this file is
 tracked too.
 """
@@ -19,11 +19,15 @@ REPO = Path(__file__).resolve().parent.parent
 GUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", re.I)
 GUID_ALLOWLIST: frozenset[str] = frozenset()  # fixture files that may hold a GUID; none does today
 # A tenant or client secret name: a word of its own in any case (tenant, TENANT_ID, client-secret, clientSecret),
-# or the camelCase end of a longer name (aadTenantId, azureClientSecret). A longer word such as subtenant is neither.
-NAME = r"(?:(?<![A-Za-z0-9])(?i:tenant(?:[_-]?id)?|client[_-]?secret)|(?<=[a-z0-9])(?:Tenant(?:[_-]?I[dD])?|Client[_-]?Secret))"
+# or the camelCase end of a longer name (aadTenantId, AADTenantId, MSALClientSecret). A longer word such as
+# subtenant is neither.
+NAME = (r"(?:(?<![A-Za-z0-9])(?i:tenant(?:[_-]?id)?|client[_-]?secret)"
+        r"|(?<=[A-Za-z0-9])(?:Tenant(?:[_-]?I[dD])?|Client[_-]?Secret))")
 ASSIGNMENT = re.compile(NAME + r"""["']?\s*[:=]\s*["']?[^\s"']""")
-ELEMENT = re.compile(r"<(?:[\w.-]+:)?[\w.-]*?(?i:tenant(?:[_-]?id)?|client[_-]?secret)(?:\s[^>]*)?>\s*[^<\s]")
-PRIVATE_KEY = re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----")
+SETTING = re.compile(r"""\bkey\s*=\s*["'][^"']*?""" + NAME + r"""["']\s+value\s*=\s*["'][^"']""")  # <add key= value=/>
+# An element with such a name, a value and its closing tag, so a placeholder such as <tenant-id> in a command isn't one.
+ELEMENT = re.compile(r"<((?:[\w.-]+:)?[\w.-]*?" + NAME + r")(?:\s[^>]*)?>\s*[^<\s][^<]*</\1\s*>")
+PRIVATE_KEY = re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----")
 KEY_FILES = (".pem", ".pfx", ".p12", ".key", ".cer", ".crt", ".der")  # the suffixes .gitignore keeps out
 
 
@@ -33,12 +37,13 @@ def tracked(root: Path) -> list[str]:
 
 
 def text(data: bytes) -> str:
-    """A file's text: UTF-16 if it starts with a UTF-16 BOM or every other byte is mostly NUL, else UTF-8."""
+    """A file's text: UTF-16 if it starts with a UTF-16 BOM, or if one byte parity is mostly NUL and the other
+    mostly not (so NUL padding, as in a binary file, still reads as UTF-8), else UTF-8."""
     if data.startswith((codecs.BOM_UTF16_LE, codecs.BOM_UTF16_BE)):
         return data.decode("utf-16", "replace")
     for first_nul, codec in ((1, "utf-16-le"), (0, "utf-16-be")):
-        every_other = data[first_nul::2]
-        if every_other and every_other.count(0) > len(every_other) / 2:
+        nuls, other = data[first_nul::2], data[1 - first_nul::2]
+        if nuls and nuls.count(0) > len(nuls) / 2 and other.count(0) < len(other) / 2:
             return data.decode(codec, "replace")
     return data.decode("utf-8", "replace")
 
@@ -55,7 +60,7 @@ def findings(root: Path, names: list[str], guid_allowlist: frozenset[str] = GUID
         for number, line in enumerate(text(path.read_bytes()).splitlines(), 1):
             if name not in guid_allowlist and GUID.search(line):
                 found.append(f"{name}:{number}: GUID")
-            if ASSIGNMENT.search(line):
+            if ASSIGNMENT.search(line) or SETTING.search(line):
                 found.append(f"{name}:{number}: tenant or secret assignment")
             if ELEMENT.search(line):
                 found.append(f"{name}:{number}: tenant or secret element")
@@ -125,10 +130,23 @@ def git_repo(root: Path, *planted: tuple[str, str | bytes]) -> None:
     ("notes.txt", f"The site is {PLANTED_GUID}.\n".encode("utf-16"), "notes.txt:1: GUID"),
     ("settings.env", f"{SECRET_WORD}=abc123\n".encode("utf-16-le"), "settings.env:1: tenant or secret assignment"),
     ("settings.env", f"{TENANT_WORD}Id=abc123\n".encode("utf-16-be"), "settings.env:1: tenant or secret assignment"),
+    ("blob.bin", b"\0" * 400 + f'\n{{"{SECRET_WORD}": "abc123"}}\n'.encode(),
+     "blob.bin:2: tenant or secret assignment"),
+    ("blob.bin", b"\0" * 400 + f"\n{PLANTED_GUID}\n".encode(), "blob.bin:2: GUID"),
+    ("data.sqlite3", b"SQLite format 3\0" + b"\0" * 3000 + f"{SECRET_WORD}=abc123\n".encode(),
+     "data.sqlite3:1: tenant or secret assignment"),
+    ("settings.env", f"AAD{TENANT_CAMEL}=abc123\n", "settings.env:1: tenant or secret assignment"),
+    ("appsettings.json", f'{{"AzureAD{SECRET_CAMEL}": "abc123"}}\n',
+     "appsettings.json:1: tenant or secret assignment"),
+    ("settings.env", f"MSAL{SECRET_CAMEL}=abc123\n", "settings.env:1: tenant or secret assignment"),
+    ("notes.txt", f"{key_header('PGP PRIVATE KEY BLOCK')}\n", "notes.txt:1: private key"),
+    ("web.config", f'<appSettings>\n  <add key="{SECRET_CAMEL}" value="abc123" />\n</appSettings>\n',
+     "web.config:2: tenant or secret assignment"),
 ], ids=["guid", "upper-guid", "secret", "env-secret", "env-tenant-id", "yaml-tenant", "json-tenant", "pem", "pfx", "p12",
         "key", "cer", "crt", "der", "private-key", "rsa-private-key", "ec-private-key", "openssh-private-key",
         "encrypted-private-key", "xml-secret", "xml-tenant-with-attribute", "xml-namespaced-secret", "utf16-bom-guid",
-        "utf16le-secret", "utf16be-tenant-id"])
+        "utf16le-secret", "utf16be-tenant-id", "nul-padded-secret", "nul-padded-guid", "sqlite-header-secret",
+        "acronym-tenant-id", "acronym-json-secret", "acronym-env-secret", "pgp-private-key", "app-setting-secret"])
 def test_a_planted_file_in_a_git_repo_is_found(tmp_path, name, text, found):
     git_repo(tmp_path, (name, text))
     assert findings(tmp_path, tracked(tmp_path)) == [found]
@@ -168,8 +186,15 @@ def test_a_file_that_isnt_tracked_is_not_scanned(tmp_path):
     f"The {TENANT_CAMEL} column is filled in by the {TENANT_WORD} admin.",
     f"<{SECRET_CAMEL}></{SECRET_CAMEL}>",
     f"<{SECRET_CAMEL}/>",
+    f"Connect-MgGraph -{TENANT_CAMEL} <{TENANT_WORD}-id> -Scopes Sites.Selected",
+    f"az login --{TENANT_WORD} <{TENANT_WORD}-id> --allow-no-subscriptions",
+    f"https://login.microsoftonline.com/<{TENANT_WORD}>/oauth2/v2.0/token",
+    f"Replace <{SECRET_WORD.replace('_', '-')}> with the value from the portal.",
+    f"<sub{TENANT_WORD}>abc</sub{TENANT_WORD}>",
+    f'<add key="{SECRET_CAMEL}" value="" />',
 ], ids=["prose", "prose-capital", "names-in-backticks", "empty-env", "empty-string", "mermaid", "longer-word",
-        "longer-word-upper", "camel-in-prose", "empty-element", "self-closing-element"])
+        "longer-word-upper", "camel-in-prose", "empty-element", "self-closing-element", "graph-placeholder",
+        "az-placeholder", "url-placeholder", "secret-placeholder", "longer-word-element", "empty-app-setting"])
 def test_a_mention_or_an_empty_value_is_not_an_assignment(tmp_path, line):
     git_repo(tmp_path, ("notes.md", f"{line}\n"))
     assert findings(tmp_path, tracked(tmp_path)) == []
