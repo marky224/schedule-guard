@@ -174,11 +174,12 @@ or any baseline.
   milestones and open conflicts of seven kinds. Then it serves the report.
   Ctrl+C, SIGTERM or SIGHUP stops `report` or `demo`: exit 0 and no
   traceback once it listens and uvicorn has shut down, one line on stderr
-  and exit 130 before it listens. A stop inside the FastAPI and pydantic
-  import can still print a traceback and exit 1, and a second Ctrl+C during
-  uvicorn's shutdown can still print one, or end the process by the signal;
-  the demo's temporary directory is removed either way. A SIGHUP that was
-  already ignored (nohup) stays ignored.
+  and exit 130 before it listens, also under `uv run`, which delivers a
+  terminal's Ctrl+C twice: a stop signal within 1 s of the first is the
+  same stop, and one more than 1 s later forces the exit. The demo's
+  temporary directory is removed either way. One case still differs: a
+  stop inside the FastAPI and pydantic import can print a traceback and
+  exit 1. A SIGHUP that was already ignored (nohup) stays ignored.
 - **US6 Hygiene and CI (M6).** A test scans tracked files for GUID-shaped
   strings outside an explicit fixture allowlist, tenant or secret
   assignments and XML elements (camelCase names too), PRIVATE KEY blocks,

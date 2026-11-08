@@ -106,8 +106,9 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
   listens on 127.0.0.1 only and answers only a Host of 127.0.0.1 or
   localhost (400 for any other, so a rebound domain can't read it).
   Ctrl+C, SIGTERM or SIGHUP stops it: exit 0 once it listens, one line on
-  stderr and exit 130 before (two rare cases can still print a traceback
-  and exit differently: PLAN.md section 7). Either way the demo's
+  stderr and exit 130 before, also under `uv run`: a stop within 1 s of the
+  first is the same stop (one exception, a stop inside the FastAPI import:
+  PLAN.md section 7). Either way the demo's
   temporary directory (no `--db`) goes then. A SIGHUP that was already
   ignored (nohup) stays ignored; a SIGKILL can't be caught and leaves the
   directory.

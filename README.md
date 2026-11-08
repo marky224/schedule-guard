@@ -140,12 +140,13 @@ page names the number. An imported baseline with a higher number is never used.
 imported; summary tasks stay on `/tasks`, marked.
 
 Ctrl+C, SIGTERM or SIGHUP stops `report` and `demo`: exit 0 once the server
-listens, or one line on stderr and exit 130 before it does. Two cases can still
-print a traceback, and their exit can differ: a stop that lands inside the
-FastAPI and pydantic import (exit 1), and a second Ctrl+C while the server shuts
-down (exit 0, or an end by the signal if it comes a little later). Either way the
-demo's temporary directory is removed. A SIGKILL can't be caught and leaves it,
-and under `nohup` a SIGHUP stays ignored.
+listens, or one line on stderr and exit 130 before it does. That holds under
+`uv run` too, which hands the command a terminal's Ctrl+C twice: a stop signal
+within 1 s of the first is the same stop. A second Ctrl+C more than 1 s later
+forces the exit. Either way the demo's temporary directory is removed. One case
+still differs: a stop that lands inside the FastAPI and pydantic import can
+print a traceback and exit 1, though the directory is still removed. A SIGKILL
+can't be caught and leaves it, and under `nohup` a SIGHUP stays ignored.
 
 ### Tests
 

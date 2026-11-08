@@ -4,6 +4,7 @@ import argparse
 import signal
 import sys
 import tempfile
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import wraps
@@ -244,29 +245,62 @@ def _conflicts_dismiss(args: argparse.Namespace) -> int:
     return 0
 
 
+STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
+REPEAT_WINDOW = 1.0  # seconds; `uv run` hands a terminal's one Ctrl+C to the command twice, about 0.2 s apart
+_first_stop: float | None = None  # when the running report or demo saw its first stop signal
+
+
+def _repeat_stop() -> bool:
+    """Whether this stop signal repeats the first one within REPEAT_WINDOW; the first one starts the window."""
+    global _first_stop
+    now = time.monotonic()
+    if _first_stop is None:
+        _first_stop = now
+        return False
+    return now - _first_stop < REPEAT_WINDOW
+
+
+def _stop(signum: int, frame: object) -> None:
+    """A stop signal while uvicorn's own handlers aren't installed: KeyboardInterrupt, unless it is a repeat."""
+    if not _repeat_stop():
+        raise KeyboardInterrupt
+
+
+def _as_sigterm(signum: int, frame: object) -> None:
+    """SIGHUP's handler: the same stop as SIGTERM, so uvicorn shuts down for it too."""
+    signal.raise_signal(signal.SIGTERM)
+
+
 def _stoppable(command: Callable[[argparse.Namespace], int]) -> Callable[[argparse.Namespace], int]:
-    """Make SIGTERM and SIGHUP stop `command` the way Ctrl+C does, so cleanup still runs.
+    """Make SIGINT, SIGTERM and SIGHUP stop `command` once, and let cleanup finish.
 
-    uvicorn catches SIGINT and SIGTERM, shuts down, puts the old handlers
-    back and raises the signal again. SIGINT's default handler then raises
-    KeyboardInterrupt, which _serve catches; SIGTERM's would end the process
-    before any `finally` or `with` exit (the demo's temporary directory would
-    stay), so here it raises KeyboardInterrupt too. SIGHUP (the terminal
-    closed), which uvicorn doesn't catch, is raised again as SIGTERM, so the
-    server shuts down the same way, unless it is already ignored (nohup). A
-    SIGKILL can't be caught.
+    uvicorn catches SIGINT and SIGTERM while it serves, shuts down, puts the
+    old handlers back and raises the signal again; outside that, SIGINT and
+    SIGTERM raise KeyboardInterrupt here, so `finally` and `with` exits still
+    run (SIGTERM's default would end the process first). SIGHUP (the
+    terminal closed) is raised again as SIGTERM, unless it is already ignored
+    (nohup); so is an ignored SIGINT (a background job) left alone.
 
-    A stop signal before the server listens reaches here as that same
-    KeyboardInterrupt: one line on stderr and exit 130.
+    A repeat within REPEAT_WINDOW of the first stop is the same stop and is
+    dropped, here and in _serve's wrapper of uvicorn's handler, since `uv run`
+    delivers a terminal's Ctrl+C twice. A later one forces the exit, as before.
+    Once the command has ended after a stop, the three are ignored for the
+    rest of the exit: Python puts the default handlers back as it finishes,
+    and a repeat landing then would end the process by the signal. A SIGKILL
+    can't be caught.
+
+    A stop before the server listens reaches here as KeyboardInterrupt: one
+    line on stderr and exit 130.
     """
 
     @wraps(command)
     def run(args: argparse.Namespace) -> int:
-        previous = {signal.SIGTERM: signal.signal(signal.SIGTERM, signal.default_int_handler)}
-        if signal.getsignal(signal.SIGHUP) is not signal.SIG_IGN:
-            previous[signal.SIGHUP] = signal.signal(
-                signal.SIGHUP, lambda signum, frame: signal.raise_signal(signal.SIGTERM)
-            )
+        global _first_stop
+        _first_stop = None
+        previous = {signal.SIGTERM: signal.signal(signal.SIGTERM, _stop)}
+        for signum, handler in ((signal.SIGINT, _stop), (signal.SIGHUP, _as_sigterm)):
+            if signal.getsignal(signum) is not signal.SIG_IGN:
+                previous[signum] = signal.signal(signum, handler)
         try:
             return command(args)
         except KeyboardInterrupt:
@@ -274,7 +308,7 @@ def _stoppable(command: Callable[[argparse.Namespace], int]) -> Callable[[argpar
             return 130
         finally:
             for signum, handler in previous.items():
-                signal.signal(signum, handler)
+                signal.signal(signum, handler if _first_stop is None else signal.SIG_IGN)
 
     return run
 
@@ -288,8 +322,15 @@ def _serve_report(args: argparse.Namespace) -> int:
 def _demo(args: argparse.Namespace) -> int:
     if args.db is not None:
         return _build_and_serve_demo(args.db, args.port)
-    with tempfile.TemporaryDirectory(prefix="schedule-guard-demo-") as scratch:
-        return _build_and_serve_demo(Path(scratch) / "demo.db", args.port)
+    scratch = tempfile.TemporaryDirectory(prefix="schedule-guard-demo-")
+    try:
+        return _build_and_serve_demo(Path(scratch.name) / "demo.db", args.port)
+    finally:
+        held = signal.pthread_sigmask(signal.SIG_BLOCK, STOP_SIGNALS)  # a stop now waits until the removal is done
+        try:
+            scratch.cleanup()
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, held)
 
 
 def _build_and_serve_demo(db: Path, port: int) -> int:
@@ -305,9 +346,17 @@ def _serve(db: Path, clock: Clock, port: int) -> int:
     from schedule_guard.report.app import create_app, server  # FastAPI and uvicorn load only to serve
 
     report = server(create_app(db, clock=clock), port)
+    handle_exit = report.handle_exit
+
+    def handle_stop(signum: int, frame: object) -> None:
+        """uvicorn's handler while it serves, minus repeats; it forces the exit on a second SIGINT."""
+        if not _repeat_stop():
+            handle_exit(signum, frame)
+
+    report.handle_exit = handle_stop
     try:
         report.run()
-    except KeyboardInterrupt:  # uvicorn has shut down and raised the stop signal again
+    except KeyboardInterrupt:  # uvicorn has shut down and raised the stop signal again, after the window
         if not report.started:  # it stopped before it listened
             raise
     return 0

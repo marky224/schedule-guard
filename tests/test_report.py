@@ -581,3 +581,99 @@ def test_served_kills_its_child_when_a_test_fails_inside_it(week_44):
         with Served("report", "--db", str(week_44)) as served:
             raise AssertionError
     assert served.process.poll() == -signal.SIGKILL
+
+
+# A repeat stop within cli.REPEAT_WINDOW of the first is the same stop: `uv run` hands a terminal's one Ctrl+C to
+# the command twice, about 0.2 s apart.
+
+
+@pytest.mark.parametrize("command", ["report", "demo"])
+def test_cli_two_sigints_0_2_s_apart_after_it_listens_stop_it_once_with_exit_0(week_44, tmp_path, command):
+    args = ["report", "--db", str(week_44)] if command == "report" else ["demo"]
+    with Served(*args, env={**os.environ, "TMPDIR": str(tmp_path)}) as served:
+        served.process.send_signal(signal.SIGINT)
+        time.sleep(0.2)  # when uv run's second one comes
+        code, err = served.stop(signal.SIGINT)
+    assert code == 0, err
+    assert "Traceback" not in err and "stopped before" not in err, err
+    assert "Finished server process" in err
+    assert list(tmp_path.iterdir()) == []  # and the demo's directory is gone
+
+
+def test_cli_two_sigints_0_2_s_apart_before_it_listens_print_one_line_and_exit_130(tmp_path):
+    child = subprocess.Popen(
+        [sys.executable, "-c", WAIT_IN, "build", "demo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env={**os.environ, "TMPDIR": str(tmp_path)}, preexec_fn=start_with,
+    )
+    try:
+        found, before = read_until(child, rb"waiting\n")
+        assert found, before
+        child.send_signal(signal.SIGINT)
+        time.sleep(0.2)
+        child.send_signal(signal.SIGINT)  # skipped if it has already ended
+        _, err = child.communicate(timeout=60)
+    finally:
+        child.kill()
+    assert child.returncode == 130, err
+    assert err == b"schedule-guard: stopped before the report started serving\n"
+    assert list(tmp_path.iterdir()) == []
+
+
+SECOND_STOP_AT_REMOVAL = """
+import signal
+import sys
+import tempfile
+import time
+from schedule_guard import cli
+
+real_rmtree = tempfile.TemporaryDirectory._rmtree  # cleanup() detaches the exit-time finalizer, then calls this
+raised = []
+
+
+def rmtree(name, *args, **kwargs):
+    if not raised:
+        raised.append(True)
+        signal.raise_signal(signal.SIGINT)  # a second stop, just as the demo's directory is removed
+    real_rmtree(name, *args, **kwargs)
+
+
+def wait(*args, **kwargs):
+    print("waiting", file=sys.stderr, flush=True)
+    while True:
+        time.sleep(0.01)
+
+
+tempfile.TemporaryDirectory._rmtree = staticmethod(rmtree)
+if sys.argv[1] == "before-listening":
+    cli.build_demo = wait
+raise SystemExit(cli.main(["demo", "--port", "0"]))
+"""
+
+
+@pytest.mark.parametrize("when", ["before-listening", "after-listening"])
+def test_cli_demo_removes_its_directory_even_when_a_second_stop_comes_as_it_does(tmp_path, when):
+    child = subprocess.Popen(
+        [sys.executable, "-c", SECOND_STOP_AT_REMOVAL, when], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env={**os.environ, "TMPDIR": str(tmp_path)}, preexec_fn=start_with,
+    )
+    try:
+        found, before = read_until(child, rb"waiting\n" if when == "before-listening" else rb"Uvicorn running on")
+        assert found, before
+        child.send_signal(signal.SIGINT)
+        _, err = child.communicate(timeout=60)
+    finally:
+        child.kill()
+    text = (before + err).decode()
+    assert list(tmp_path.iterdir()) == []  # demo.db, its lock file and the directory are all gone
+    assert "Traceback" not in text, text
+    if when == "before-listening":
+        assert (child.returncode, err) == (130, b"schedule-guard: stopped before the report started serving\n")
+    else:
+        assert child.returncode == 0 and "Finished server process" in text and "stopped before" not in text, text
+
+
+def test_a_stop_within_1_s_of_the_first_is_a_repeat_and_a_later_one_is_not(monkeypatch):
+    now = iter([100.0, 100.2, 100.99, 101.0, 105.0])
+    monkeypatch.setattr(cli, "time", types.SimpleNamespace(monotonic=lambda: next(now)))
+    monkeypatch.setattr(cli, "_first_stop", None)
+    assert [cli._repeat_stop() for _ in range(5)] == [False, True, True, False, False]
