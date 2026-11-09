@@ -636,7 +636,10 @@ Decision table:
   `&#13;`. A name outside any namespace is refused, since ElementTree can't
   write it under a default one, and so is an existing `--out` file (Q97):
   it is created exclusively, then a temporary file in the same folder is
-  renamed over it.
+  renamed over it. Imported again, an export turns each Baseline
+  `rebaseline` added into an imported one, so the new database's report
+  measures variance against Baseline 0 (§7); a re-import is a fresh
+  database (Q14).
 - "Openable in Project" needs MS Project desktop to confirm. The repo owner
   doesn't have it (Q1), so the claim stays **UNVERIFIED** (Challenge C3).
 - Risk: Project may recalculate dependent fields when it opens the file
