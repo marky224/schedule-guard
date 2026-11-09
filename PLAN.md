@@ -418,8 +418,9 @@ Rules that hold no matter which check fires:
   (mostly init_import_site); after that it mostly ends the process by the
   signal with Python's KeyboardInterrupt traceback. Now and then, most often
   just after the `site` import, the interrupt lands in start-up code whose
-  errors Python only prints ("Exception ignored in: ...", from importlib),
-  and the command runs on, so `demo` builds its database and serves
+  errors Python only prints, as "Failed checking if argv[0] is an import
+  path entry" with a KeyboardInterrupt traceback from zipimport, or as
+  "Exception ignored in: ..." from importlib, and the command runs on, so `demo` builds its database and serves
   (measured 2026-11-08 on one Linux machine with the system Python 3.12:
   about 0–4 ms, about 5–6 ms, then from about 7 ms until the handlers were
   in at about 60–70 ms; it ran on in about 2 runs in 100 between about 6

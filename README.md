@@ -172,8 +172,10 @@ imports its `site` module it exits 1 with a "Fatal Python error" (mostly
 init_import_site); after that it mostly ends the process by the signal with
 Python's KeyboardInterrupt traceback. Now and then, most often just after the
 `site` import, the interrupt lands in start-up code whose errors Python only
-prints ("Exception ignored in: ...", then KeyboardInterrupt), and the command
-runs on; `demo` then builds its database and serves. (Measured on one Linux
+prints, in one of two forms: "Failed checking if argv[0] is an import path
+entry", then a KeyboardInterrupt traceback from zipimport; or "Exception ignored
+in: ...", then KeyboardInterrupt. Either way the command runs on; `demo` then
+builds its database and serves. (Measured on one Linux
 machine: about 0–4 ms, about 5–6 ms, then from about 7 ms until the CLI's
 handlers were in, at about 60–70 ms; the command ran on in about 2 runs in 100
 between about 6 and 10 ms, and once at 30 ms.) A stop that lands inside the

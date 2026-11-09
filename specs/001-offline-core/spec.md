@@ -187,8 +187,9 @@ or any baseline.
   error" (mostly init_import_site) while Python imports its `site` module
   (about 5–6 ms), and after that mostly ends it by the signal with Python's
   KeyboardInterrupt traceback; now and then, most often just after the
-  `site` import, start-up code only prints the interrupt ("Exception
-  ignored in: ...") and the command runs on; and a stop inside the
+  `site` import, start-up code only prints the interrupt ("Failed checking
+  if argv[0] is an import path entry" with a KeyboardInterrupt traceback
+  from zipimport, or "Exception ignored in: ...") and the command runs on; and a stop inside the
   FastAPI and pydantic import can print a traceback and exit 1. A SIGHUP
   that was already ignored (nohup) stays ignored.
 - **US6 Hygiene and CI (M6).** A test scans tracked files for GUID-shaped
