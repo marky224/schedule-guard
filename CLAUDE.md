@@ -66,6 +66,7 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
   0.11.15), least privilege, actions pinned by full commit SHA;
   `dependabot.yml` proposes updates to those pins monthly
 - specs/001-offline-core/ — spec.md, plan.md, tasks.md for M1–M6
+- specs/002-export/ — spec.md, plan.md, tasks.md for M7 (MSPDI export, P7)
 - .claude/skills/domain/ — ontology, glossary (present)
 - PLAN.md — architecture, guard rules, milestones, decisions (§15), sources
 
