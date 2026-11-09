@@ -56,7 +56,7 @@ or any baseline.
   that isn't UTF-8, it refuses. It
   refuses past baseline number 10 (**UNVERIFIED**: MS Project's Baseline plus
   Baseline1–10, from memory; Learn's Baseline element page gives no range;
-  checked in M7). Sync, rerun and report code never call it.
+  M7 had no real export to check it against, Q1). Sync, rerun and report code never call it.
 - **US3 Guard (M3).** Each progress update gets exactly one outcome:
   `applied`, `conflict` or `duplicate`. Checks, first failure wins:
   - G0: key already decided → `duplicate`.
@@ -210,7 +210,7 @@ or any baseline.
   element more than 3 levels below the Baseline or PredecessorLink: rejected
   before C14N, so the C14N work stays linear with a small constant. A
   Baseline `Number` above 10: rejected. (All UNVERIFIED against a real
-  Project export; checked in M7.)
+  Project export, Q1; M7 couldn't check them either.)
 - A carriage return in text (`&#13;`): stored as a line feed in the C14N
   bytes, which are those of the subtree as ElementTree writes it out again;
   the values read into the other columns keep it.
@@ -313,5 +313,5 @@ or any baseline.
   temp file; CI runs the suite on GitHub.
 
 ## Open questions
-- None blocking. The baseline-number cap (10) is UNVERIFIED and is checked
-  in M7.
+- None blocking. The baseline-number cap (10) is UNVERIFIED; M7 had no
+  real export to check it against (Q1).

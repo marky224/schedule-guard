@@ -34,7 +34,7 @@ _NS_OPEN = f"{{{NS}}}"  # how ElementTree starts a name in NS; expat refuses a "
 MAX_FILE_BYTES = 20 * 1024 * 1024
 MAX_TASKS = 10_000
 # MS Project's Baseline plus Baseline1-10, and how deep a Baseline or a
-# PredecessorLink nests: both UNVERIFIED against a real export until M7.
+# PredecessorLink nests: both UNVERIFIED, with no real export to check (Q1).
 MAX_BASELINE_NUMBER = 10
 MAX_NESTING = 3
 # The master schedule's elements; task.plan_c14n holds them.

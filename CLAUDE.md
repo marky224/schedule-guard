@@ -57,9 +57,9 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
   UTF-16 runs in other files too, for GUIDs, tenant or secret assignments
   and XML elements, private key blocks and key files;
   `conftest.py` shared fixtures and the Hypothesis profile)
-- tests/properties/ — Hypothesis P1–P6 on the sync engine, a property that
-  no line stops a run, the state machine and the teeth test (`harness.py`
-  writes the update files)
+- tests/properties/ — Hypothesis P1–P6 on the sync engine and P7 on the
+  export after it, a property that no line stops a run, the state machine
+  and the teeth test (`harness.py` writes the update files)
 - tests/fixtures/ — generated, fictional inputs (`riverbend-clinic.xml`,
   `updates/week-44.jsonl`, `demo-updates.jsonl`)
 - scripts/ — `make_fixture.py`, the seeded fixture generator

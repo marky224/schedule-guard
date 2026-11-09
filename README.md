@@ -76,7 +76,17 @@ uv run schedule-guard conflicts dismiss --db "$DB" 1 --note "Resubmit against th
 
 # Append a new locked baseline from the current planned values. It can never be removed.
 uv run schedule-guard rebaseline --db "$DB" --confirm --reason "Owner approved the new dates"
+
+# Write the imported MSPDI file, with the progress applied, to a new file. The database is only read.
+uv run schedule-guard export --db "$DB" --out "$(dirname "$DB")/riverbend-progress.xml"
 ```
+
+`export` starts from the file the project was imported from and changes only
+each task's % complete, actual start, actual finish, remaining work and notes,
+to the values in the database. It adds the baselines `rebaseline` made, and
+leaves the master schedule and the imported baselines exactly as imported. It
+refuses a path that already exists. Whether MS Project opens the file is
+untested: there is no MS Project desktop here, only the generated fixture.
 
 `rerun` processes again what an earlier run captured, as a new run, which is how
 a run that failed or was killed gets finished. It takes a run id from `runs list`,
@@ -170,9 +180,9 @@ updates to the workflow's two pinned actions once a month.
 
 ### What Phase 2 adds
 
-Phase 2 is planned, not built. It connects the same guard to a Microsoft 365
-tenant, with a daily sync on one Linux machine and nothing listening for inbound
-traffic:
+Phase 2 has begun with the offline MSPDI export (`export`, above). The rest is
+planned, not built. It connects the same guard to a Microsoft 365 tenant, with a
+daily sync on one Linux machine and nothing listening for inbound traffic:
 
 - A source that reads a SharePoint "Progress Updates" list through Microsoft
   Graph, with certificate sign-in and write access to two named lists only.
@@ -181,7 +191,6 @@ traffic:
   its row.
 - Alerts: a failed run posted to a Teams channel, and an email when an update
   becomes a conflict.
-- MSPDI export with progress applied and the baselines untouched.
 - A systemd user timer for the daily run.
 
 The design is in [PLAN.md](PLAN.md), section 9.

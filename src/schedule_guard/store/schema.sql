@@ -11,7 +11,7 @@
 --     for a missing project or once its project's import has finished, a
 --     baseline for a missing project, a baseline that is already locked or
 --     numbered outside 0-10 (MS Project's Baseline plus Baseline1-10,
---     UNVERIFIED until M7), or a baseline_task row for a missing task or a
+--     UNVERIFIED, no real export, Q1), or a baseline_task row for a missing task or a
 --     missing or locked baseline.
 -- They don't refuse a new, unlocked baseline numbered 0-10 with rows for
 -- existing tasks: that is how rebaseline appends one, and the schema can't

@@ -79,7 +79,7 @@ the Entra token endpoint, and the Workflows trigger URL. Nothing listens for
 inbound traffic. The report binds to `127.0.0.1` and answers only a Host
 of `127.0.0.1` or `localhost`.
 
-### Layout (`[M0]`–`[M6]` = exists since that milestone; everything else comes in later runs)
+### Layout (`[M0]`–`[M7]` = exists since that milestone; everything else comes in later runs)
 
 ```
 pyproject.toml, uv.lock              [M0] uv-managed, Python 3.12
@@ -89,11 +89,12 @@ README.md                            [M6] Phase 1 section
 CLAUDE.md                            [M0] stack, commands, map, invariants
 .claude/skills/domain/               [M0] ontology, glossary
 specs/001-offline-core/              [M0] spec, plan, tasks for M1–M6
+specs/002-export/                    [M7] spec, plan, tasks for M7
 src/schedule_guard/                  [M0]
   __init__.py                        [M0] package version
   cli.py                             [M0] argparse entry point: `schedule-guard ...` (the Phase 1 commands below)
   mspdi/parse.py                     [M1] safe MSPDI reader (defusedxml)
-  mspdi/export.py                    progress-only MSPDI writer (Phase 2)
+  mspdi/export.py                    [M7] progress-only MSPDI writer: `export`, read-only on the database
   store/schema.sql, store/db.py      [M2] SQLite schema, read-only triggers; open/migrate, transactions, read-only open (M5)
   importer.py                        [M2] `import` into an empty database
   baselines.py                       [M2] `baseline lock`, `rebaseline`
@@ -112,7 +113,7 @@ src/schedule_guard/                  [M0]
   demo.py                            [M5] builds the demo database for the report
 scripts/make_fixture.py              [M1] deterministic fixture generator
 tests/fixtures/                      [M1] generated MSPDI + update files (fake data only; `riverbend-clinic.xml`, `updates/week-44.jsonl`, `demo-updates.jsonl` so far)
-tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py`, `test_fixture.py`, `test_mspdi_parse.py`, `test_store_triggers.py`, `test_import.py`, `test_baselines.py`, `test_clock.py`, `test_guard_rules.py`, `test_progress.py`, `test_sources.py`, `test_sync.py`, `test_review.py`, `test_report.py`, `test_demo.py`, `test_hygiene.py`, `conftest.py`, `properties/` so far)
+tests/                               [M0] unit, property (Hypothesis), report tests (`test_smoke.py`, `test_fixture.py`, `test_mspdi_parse.py`, `test_store_triggers.py`, `test_import.py`, `test_baselines.py`, `test_clock.py`, `test_guard_rules.py`, `test_progress.py`, `test_sources.py`, `test_sync.py`, `test_review.py`, `test_report.py`, `test_demo.py`, `test_hygiene.py`, `test_export.py`, `conftest.py`, `properties/` so far)
 deploy/systemd/                      user .service + .timer (Phase 2)
 docs/tenant-setup.md                 Phase 2 runbook for the tenant admin
 docs/spike-graph-selected.md         Phase 2 spike results
@@ -125,14 +126,14 @@ CLI (Phase 1):
 | --- | --- |
 | `schedule-guard import --db <path> <file.xml>` | Parses the MSPDI file, then stores the project, master schedule, baselines and raw file bytes. Works only on an empty project. |
 | `schedule-guard baseline lock --db <path> [--number N]` | Locks a baseline that was imported (Baseline 0 by default). Locked baselines are read-only. |
-| `schedule-guard rebaseline --db <path> --confirm --reason "..."` | Admin only. Appends a new baseline number built from the current planned values, and locks it. Old baselines never change (Q7). Refuses past baseline number 10 (Project's Baseline + Baseline1–10: **UNVERIFIED**, [L14] gives no range; checked in M7). |
+| `schedule-guard rebaseline --db <path> --confirm --reason "..."` | Admin only. Appends a new baseline number built from the current planned values, and locks it. Old baselines never change (Q7). Refuses past baseline number 10 (Project's Baseline + Baseline1–10: **UNVERIFIED**, [L14] gives no range; M7 had no real Project export to check it against, Q1). |
 | `schedule-guard sync now --db <path> --source file:<path>` | Runs a sync immediately. Records a run with an id. |
 | `schedule-guard sync daily --db <path> --source file:<path>` | Same as `sync now`, labelled `daily`. The timer calls this one. |
 | `schedule-guard rerun --db <path> <run-id>` | Reprocesses the source items that run captured. Keys already decided count as duplicates. Records a new run with `rerun_of`. Refuses a run that captured nothing. |
 | `schedule-guard runs list --db <path>` / `conflicts list --db <path> [--all]` / `conflicts dismiss --db <path> <id> --note "..."` | Inspect runs and conflicts. Dismiss a conflict with a note; it is never applied. |
 | `schedule-guard report --db <path> [--port 8000]` | Serves the read-only HTML report on 127.0.0.1 only. Ctrl+C, SIGTERM or SIGHUP stops it: exit 0 once it listens, 130 before, also under `uv run` (two exceptions: §7). |
 | `schedule-guard demo [--db <path>] [--port 8000]` | Builds a new demo DB from the fixture and scripted updates (some applied, some conflicts), then serves the report on it. The path must not exist; without `--db` the DB lives in a temporary directory, removed when the demo stops on Ctrl+C, SIGTERM or SIGHUP (a SIGKILL leaves it). |
-| `schedule-guard export <out.xml>` | Phase 2 (offline). Writes MSPDI with progress applied and the baseline untouched. |
+| `schedule-guard export --db <path> --out <file>` | Phase 2 (offline, M7). Writes the imported MSPDI file with each task's progress fields from the database and the baselines `rebaseline` added; the master schedule and the imported baselines stay C14N-identical (P7). Reads the database only. The file must not exist (Q97). |
 
 Every command that uses the database takes `--db <path>` (required; `demo`
 builds a new one, in a temporary directory if `--db` is left out); the
@@ -198,7 +199,7 @@ baseline(project_id, number, locked_at NULL, locked_by, reason, created_at,
     trigger: BEFORE INSERT -> ABORT when the primary key already exists,
              the project does not exist, the row is already locked
              (locked_at or locked_by set), or its number isn't an integer
-             from 0 to 10 (the cap is UNVERIFIED, checked in M7)
+             from 0 to 10 (the cap is UNVERIFIED: no real export, Q1)
 baseline_task(project_id, number, task_uid, start, finish, duration, work, cost,
               xml_c14n BLOB,                 -- C14N bytes of the <Baseline> subtree
               PRIMARY KEY(project_id, number, task_uid)) WITHOUT ROWID
@@ -346,7 +347,8 @@ Rules that hold no matter which check fires:
   stack once per level, so thousands of namespaces would take quadratic
   time, and nesting near Python's recursion limit about 6 times as long. A
   Baseline `Number` runs from 0 to 10. That a real Project export stays
-  inside all of these is **UNVERIFIED** (no real export, Q1); checked in M7.
+  inside all of these is **UNVERIFIED** (no real export, Q1); M7 couldn't
+  check it either.
 - The C14N bytes are those of the subtree as ElementTree writes it out
   again, so a carriage return in text (`&#13;` in the file) is stored there
   as a line feed. The values read into the other columns, such as
@@ -464,7 +466,8 @@ Plus:
 - **The oracle has teeth.** A test monkeypatches a deliberately broken applier
   that writes `planned_finish` or a baseline field. It asserts P1 or P2
   *fails*, and that the DB trigger raises. This shows the properties can
-  detect the bug they guard against.
+  detect the bug they guard against. Likewise a broken exporter that also
+  writes a planned element, or drops a Baseline, makes P7 fail.
 - Unit tests for each guard rule G0–G8.
 - Malicious XML tests (billion laughs, XXE file read, external DTD, oversize).
   Each must be rejected without reading any file.
@@ -625,6 +628,15 @@ Decision table:
 - Re-parse the stored original bytes, set only the five progress elements on
   each task, and serialize with the default namespace registered. Baseline and
   planned elements stay C14N-identical (P7).
+- Built in M7 (spec 002): `export --db <path> --out <file>`. A progress
+  value equal to the file's leaves its element alone; a new element goes to
+  its place in the MSPDI Task sequence (the order is **UNVERIFIED**, C7).
+  Each baseline `rebaseline` added is written as a `<Baseline>` element
+  with its stored C14N bytes (Q39). A carriage return in text is written as
+  `&#13;`. A name outside any namespace is refused, since ElementTree can't
+  write it under a default one, and so is an existing `--out` file (Q97):
+  it is created exclusively, then a temporary file in the same folder is
+  renamed over it.
 - "Openable in Project" needs MS Project desktop to confirm. The repo owner
   doesn't have it (Q1), so the claim stays **UNVERIFIED** (Challenge C3).
 - Risk: Project may recalculate dependent fields when it opens the file
@@ -690,7 +702,7 @@ work; M9 needs the repo owner's go-ahead for live calls)
 
 | # | Run | Size | Proof |
 | --- | --- | --- | --- |
-| M7 | MSPDI export (offline) + P7. | M | P7 green. The exported file re-imports into an empty project. |
+| M7 | MSPDI export (offline) + P7. **Done 2026-11-08** (spec 002); "opens in MS Project", the Baseline 0–10 cap and the nesting limits stay UNVERIFIED (Q1). | M | P7 green. The exported file re-imports into an empty project. |
 | M8 | `docs/tenant-setup.md` runbook + `.env.example`: app registration with certificate, Team + two lists + columns + user permissions, the one-time grant commands the tenant admin runs (Graph PowerShell, plus the revoke command; Q8), Workflows flow, List rule. Docs only. | S | Docs review. Hygiene test passes. |
 | M9 | **Spike** (§9.3) against the demo lists under the Selected grant. Writes `docs/spike-graph-selected.md` with the decision. | S | Recorded request/response shapes (ids redacted). Decision table filled in. |
 | M10 | Graph auth (MSAL certificate) + client (paging, retries, 410) + Graph source adapter, tested against recorded fixtures. | L | Tests green offline. No `Sites.*.All` string anywhere in the code (test). |
