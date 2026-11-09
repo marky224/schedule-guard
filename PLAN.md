@@ -408,9 +408,15 @@ Rules that hold no matter which check fires:
   blocked, so a stop can't cut that short, and once the command has ended
   after a stop they are ignored until the process exits. Two cases still
   differ. A stop in roughly the first 0.1 s, during interpreter start-up
-  and the CLI's imports, before it has installed its handlers, ends the
-  process by the signal: SIGINT with Python's KeyboardInterrupt traceback,
-  SIGTERM or SIGHUP with no line; no demo directory exists yet. A stop that
+  and the CLI's imports, before it has installed its handlers, comes before
+  any demo directory exists. SIGTERM or SIGHUP ends the process by the
+  signal with no line. SIGINT depends on when it lands: before Python has
+  its own handler it ends the process by the signal with no output; while
+  Python imports its `site` module it exits 1 with "Fatal Python error:
+  init_import_site"; after that it ends the process by the signal with
+  Python's KeyboardInterrupt traceback (measured 2026-11-08 on one Linux
+  machine: 0–4 ms, 5–6 ms, then from 7 ms until the handlers were in at
+  about 60 ms). A stop that
   lands inside the FastAPI and pydantic import (pydantic-core turns the
   KeyboardInterrupt into its own error) prints a traceback and exits 1; the
   directory is still removed. A SIGHUP that was
@@ -471,7 +477,10 @@ Plus:
   (PGP ones too), and files with any of the seven key suffixes `.gitignore`
   lists. A file in UTF-16 (a BOM, or bytes that alternate between mostly NUL
   and mostly not) is scanned both as UTF-16 and as UTF-8, so an ASCII line
-  in it is found too; the same file, line and kind from both is one finding.
+  in it is found too. Every file is also scanned with each run of UTF-16
+  text in it (bytes that alternate with NUL) read as UTF-16, so a UTF-16
+  line inside a file that reads as UTF-8 is found too. The same file, line
+  and kind from more than one decode is one finding.
   Only fixture GUIDs on an explicit allowlist may pass.
 - Phase 2 Graph code is tested against recorded JSON responses (paging,
   deltaLink, 410 Gone, duplicate items in the delta feed, deleted items, 412

@@ -4,7 +4,10 @@ The scan reads what `git ls-files` lists, so it needs a git checkout: on a
 copy with no .git it errors, and can't pass without having looked. A file
 that starts with a UTF-16 BOM, or whose bytes alternate between mostly NUL
 and mostly not, is scanned as UTF-16 and as UTF-8, so an ASCII line in it is
-found too; a line both decodes flag counts once. A finding names the file
+found too. Every file is also scanned with each run of UTF-16 text in it
+(bytes that alternate with NUL) read as UTF-16, so a UTF-16 line inside a
+file that reads as UTF-8 is found too. A line more than one decode flags
+counts once. A finding names the file
 and line, never the value. The planted values below are built from parts,
 since this file is tracked too.
 """
@@ -30,6 +33,8 @@ SETTING = re.compile(r"""\bkey\s*=\s*["'][^"']*?""" + NAME + r"""["']\s+value\s*
 ELEMENT = re.compile(r"<((?:[\w.-]+:)?[\w.-]*?" + NAME + r")(?:\s[^>]*)?>\s*[^<\s][^<]*</\1\s*>")
 PRIVATE_KEY = re.compile(r"-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY(?: BLOCK)?-----")
 KEY_FILES = (".pem", ".pfx", ".p12", ".key", ".cer", ".crt", ".der")  # the suffixes .gitignore keeps out
+# A run of two or more UTF-16 code units whose high byte is NUL (ASCII and Latin-1 text), little- or big-endian.
+UTF16_RUNS = ((re.compile(rb"(?:[^\0]\0){2,}"), "utf-16-le"), (re.compile(rb"(?:\0[^\0]){2,}"), "utf-16-be"))
 
 
 def tracked(root: Path) -> list[str]:
@@ -49,6 +54,16 @@ def text(data: bytes) -> str:
     return data.decode("utf-8", "replace")
 
 
+def with_utf16_runs(data: bytes, run: re.Pattern[bytes], codec: str) -> str:
+    """`data` read as UTF-8, but each `run` in it read as `codec`, so a UTF-16 line inside a UTF-8 file is found."""
+    parts, end = [], 0
+    for found in run.finditer(data):
+        parts += [data[end:found.start()].decode("utf-8", "replace"), found[0].decode(codec)]
+        end = found.end()
+    parts.append(data[end:].decode("utf-8", "replace"))
+    return "".join(parts)
+
+
 def findings(root: Path, names: list[str], guid_allowlist: frozenset[str] = GUID_ALLOWLIST) -> list[str]:
     """What the hygiene rules find in the files `names` under `root`."""
     found = []
@@ -60,7 +75,8 @@ def findings(root: Path, names: list[str], guid_allowlist: frozenset[str] = GUID
             continue
         data = path.read_bytes()
         here = []
-        for decoded in dict.fromkeys([text(data), data.decode("utf-8", "replace")]):  # one, unless text() read UTF-16
+        decodes = [text(data), data.decode("utf-8", "replace"), *(with_utf16_runs(data, *r) for r in UTF16_RUNS)]
+        for decoded in dict.fromkeys(decodes):  # one, unless text() read UTF-16 or the file holds a UTF-16 run
             for number, line in enumerate(decoded.splitlines(), 1):
                 if name not in guid_allowlist and GUID.search(line):
                     here.append(f"{name}:{number}: GUID")
@@ -153,13 +169,19 @@ def git_repo(root: Path, *planted: tuple[str, str | bytes]) -> None:
     ("settings.env", f"{SECRET_WORD}=abc123\n".encode() + "Notes for the app\n".encode("utf-16-le") * 20,
      "settings.env:1: tenant or secret assignment"),
     ("notes.txt", PLANTED_GUID.encode() + f" {PLANTED_GUID}\n".encode("utf-16-le"), "notes.txt:1: GUID"),
+    ("settings.env", b"Notes for the app\n" * 20 + f"{SECRET_WORD} = abc123XYZ\n".encode("utf-16-le"),
+     "settings.env:21: tenant or secret assignment"),
+    ("notes.txt", b"Notes for the app\n" * 20 + f"site {PLANTED_GUID}\n".encode("utf-16-be"), "notes.txt:21: GUID"),
+    ("notes.txt", b"Notes for the app\n" * 20 + f"{key_header('PRIVATE KEY')}\n".encode("utf-16-le")
+     + b"More notes\n" * 20, "notes.txt:21: private key"),
 ], ids=["guid", "upper-guid", "secret", "env-secret", "env-tenant-id", "yaml-tenant", "json-tenant", "pem", "pfx", "p12",
         "key", "cer", "crt", "der", "private-key", "rsa-private-key", "ec-private-key", "openssh-private-key",
         "encrypted-private-key", "xml-secret", "xml-tenant-with-attribute", "xml-namespaced-secret", "utf16-bom-guid",
         "utf16le-secret", "utf16be-tenant-id", "nul-padded-secret", "nul-padded-guid", "sqlite-header-secret",
         "acronym-tenant-id", "acronym-json-secret", "acronym-env-secret", "pgp-private-key", "app-setting-secret",
         "alternating-bytes-then-ascii-secret", "utf16-then-ascii-secret", "ascii-secret-then-utf16",
-        "guid-in-both-decodes"])
+        "guid-in-both-decodes", "ascii-lines-then-utf16le-secret", "ascii-lines-then-utf16be-guid",
+        "utf16le-key-between-ascii-lines"])
 def test_a_planted_file_in_a_git_repo_is_found(tmp_path, name, text, found):
     git_repo(tmp_path, (name, text))
     assert findings(tmp_path, tracked(tmp_path)) == [found]

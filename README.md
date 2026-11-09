@@ -146,9 +146,14 @@ within 1 s of the first is the same stop. A second Ctrl+C more than 1 s later
 forces the exit. Either way the demo's temporary directory is removed, and once
 the command has ended after a stop, further stop signals are ignored until the
 process exits. Two cases still differ. A stop in roughly the first 0.1 s, before
-the CLI has installed its handlers, ends the process by the signal: SIGINT with
-Python's KeyboardInterrupt traceback, SIGTERM or SIGHUP with no line. No demo
-directory exists yet then. A stop that lands inside the FastAPI and pydantic
+the CLI has installed its handlers, comes before any demo directory exists.
+SIGTERM or SIGHUP then ends the process by the signal with no line. SIGINT
+depends on when it lands: in the first few milliseconds, before Python has its
+own handler, it ends the process by the signal with no output; while Python
+imports its `site` module it exits 1 with "Fatal Python error:
+init_import_site"; after that it ends the process by the signal with Python's
+KeyboardInterrupt traceback. (Measured on one Linux machine: 0–4 ms, 5–6 ms,
+then from 7 ms until the CLI's handlers were in, at about 60 ms.) A stop that lands inside the FastAPI and pydantic
 import can print a traceback and exit 1, though the directory is still removed.
 A SIGKILL can't be caught and leaves it, and under `nohup` a SIGHUP stays
 ignored.

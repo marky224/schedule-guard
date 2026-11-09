@@ -180,9 +180,13 @@ or any baseline.
   temporary directory is removed either way, and once the command has
   ended after a stop, further stop signals are ignored until the process
   exits. Two cases still differ: a stop in roughly the first 0.1 s, before
-  the CLI has installed its handlers, ends the process by the signal
-  (SIGINT with Python's KeyboardInterrupt traceback, SIGTERM or SIGHUP
-  with no line) before any demo directory exists; and a stop inside the
+  the CLI has installed its handlers, comes before any demo directory
+  exists, and SIGTERM or SIGHUP then ends the process by the signal with no
+  line, while SIGINT ends it by the signal with no output before Python has
+  its own handler (0–4 ms measured), exits 1 with "Fatal Python error:
+  init_import_site" while Python imports its `site` module (5–6 ms), and
+  after that ends it by the signal with Python's KeyboardInterrupt
+  traceback; and a stop inside the
   FastAPI and pydantic import can print a traceback and exit 1. A SIGHUP
   that was already ignored (nohup) stays ignored.
 - **US6 Hygiene and CI (M6).** A test scans tracked files for GUID-shaped
@@ -191,7 +195,9 @@ or any baseline.
   and a closing tag (camelCase and acronym-prefixed names too), PRIVATE KEY
   blocks (PGP ones too), and key files (the seven suffixes `.gitignore`
   lists); a UTF-16 file is scanned both as UTF-16 and as UTF-8 (one
-  finding per line and kind), and a NUL-padded one as UTF-8 only. A GitHub Actions workflow runs
+  finding per line and kind), and a NUL-padded one as UTF-8; every file is
+  also scanned with each run of UTF-16 text in it (bytes that alternate
+  with NUL) read as UTF-16, so a UTF-16 line inside a UTF-8 file is found. A GitHub Actions workflow runs
   `uv run --locked pytest -q` (Q15), so a stale `uv.lock` fails it; its
   config gets a max-effort review.
 
