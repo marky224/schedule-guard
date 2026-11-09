@@ -185,7 +185,8 @@ def write_new_file(path: str | Path, data: bytes) -> None:
             mode = stat.S_IMODE(os.fstat(fd).st_mode)  # 0o666 less the umask, as for any new file
         finally:
             os.close(fd)
-        tmp_fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+        # A short fixed name, so any --out name that is valid on its own works.
+        tmp_fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".schedule-guard-", suffix=".tmp")
         try:
             with open(tmp_fd, "wb") as f:
                 f.write(data)

@@ -302,6 +302,13 @@ def test_cli_export_writes_the_file_and_prints_one_line(fixture_db, tmp_path, ca
     assert out.read_bytes() == export_mspdi(fixture_db).data
 
 
+def test_cli_export_writes_any_out_name_valid_on_its_own(fixture_db, tmp_path, capsys):
+    out = tmp_path / ("r" * 246 + ".xml")  # 250 bytes, under the 255 a name may have here
+    assert cli.main(["export", "--db", str(fixture_db), "--out", str(out)]) == 0, capsys.readouterr().err
+    assert out.read_bytes() == export_mspdi(fixture_db).data
+    assert list(tmp_path.iterdir()) == [out]  # the temporary file was renamed, not left
+
+
 def test_cli_export_refuses_an_existing_out_with_one_error_line(fixture_db, tmp_path, capsys):
     out = tmp_path / "out.xml"
     out.write_bytes(b"keep me")
