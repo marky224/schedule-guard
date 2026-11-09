@@ -15,6 +15,7 @@ from schedule_guard.baselines import BaselineRefused, lock_baseline, rebaseline
 from schedule_guard.clock import Clock
 from schedule_guard.demo import DEMO_CLOCK, DemoRefused, build_demo
 from schedule_guard.importer import ImportRefused, import_source, read_source
+from schedule_guard.mspdi.export import ExportRefused, export_mspdi, write_new_file
 from schedule_guard.mspdi.parse import MspdiError
 from schedule_guard.review import ReviewRefused, dismiss, list_conflicts
 from schedule_guard.sources.file import FileSource
@@ -22,7 +23,10 @@ from schedule_guard.store.db import StoreError, open_db
 from schedule_guard.sync import RunResult, SyncRefused, list_runs, rerun, sync
 
 # A refusal prints one error line and exits 1; OSError covers a missing file.
-REFUSALS = (MspdiError, StoreError, ImportRefused, BaselineRefused, SyncRefused, ReviewRefused, DemoRefused, OSError)
+REFUSALS = (
+    MspdiError, StoreError, ImportRefused, BaselineRefused, SyncRefused, ReviewRefused, DemoRefused, ExportRefused,
+    OSError,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -103,6 +107,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--port", type=_port, default=8000, metavar="PORT", help="the port on 127.0.0.1 (default: 8000)"
     )
     demo.set_defaults(run=_demo)
+
+    exp = commands.add_parser(
+        "export", parents=[db], help="write the project as MSPDI with its progress; the database is only read"
+    )
+    exp.add_argument(
+        "--out", required=True, type=Path, metavar="FILE", help="the MSPDI file to write; it must not exist"
+    )
+    exp.set_defaults(run=_export)
     return parser
 
 
@@ -169,6 +181,17 @@ def _rebaseline(args: argparse.Namespace) -> int:
     finally:
         conn.close()
     print(f"added baseline {number} from the current planned values and locked it")
+    return 0
+
+
+def _export(args: argparse.Namespace) -> int:
+    exported = export_mspdi(args.db)  # a refused export leaves no file behind
+    write_new_file(args.out, exported.data)
+    added = ", ".join(map(str, exported.added_baselines)) or "none"
+    print(
+        f"exported {_printable(exported.name or '(no name)')}: {exported.tasks} tasks, progress written on"
+        f" {exported.progress_tasks}, baselines added by rebaseline: {added}; wrote {_printable(str(args.out))}"
+    )
     return 0
 
 

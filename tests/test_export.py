@@ -10,6 +10,7 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
+from schedule_guard import cli
 from schedule_guard.baselines import rebaseline
 from schedule_guard.clock import fixed_clock
 from schedule_guard.importer import import_file
@@ -270,3 +271,57 @@ def test_write_new_file_removes_both_files_when_it_fails(tmp_path, monkeypatch, 
     with pytest.raises(type(error)):
         write_new_file(tmp_path / "out.xml", b"<Project/>\n")
     assert list(tmp_path.iterdir()) == []
+
+
+# The CLI: export --db PATH --out FILE.
+
+
+def test_cli_export_writes_the_file_and_prints_one_line(fixture_db, tmp_path, capsys):
+    sync(fixture_db, FileSource(WEEK_44), clock=CLOCK)
+    out = tmp_path / "riverbend-progress.xml"
+    assert cli.main(["export", "--db", str(fixture_db), "--out", str(out)]) == 0
+    assert capsys.readouterr() == (
+        "exported Riverbend Clinic: 40 tasks, progress written on 3, baselines added by rebaseline: none;"
+        f" wrote {out}\n", "",
+    )
+    assert out.read_bytes() == export_mspdi(fixture_db).data
+
+
+def test_cli_export_refuses_an_existing_out_with_one_error_line(fixture_db, tmp_path, capsys):
+    out = tmp_path / "out.xml"
+    out.write_bytes(b"keep me")
+    assert cli.main(["export", "--db", str(fixture_db), "--out", str(out)]) == 1
+    assert capsys.readouterr() == (
+        "", f"schedule-guard: error: {out} already exists; export writes a new file and never replaces one\n"
+    )
+    assert out.read_bytes() == b"keep me"
+    assert list(tmp_path.iterdir()) == [out]
+
+
+def test_cli_export_refuses_a_missing_database_and_writes_nothing(tmp_path, capsys):
+    assert cli.main(["export", "--db", str(tmp_path / "typo.db"), "--out", str(tmp_path / "out.xml")]) == 1
+    out, err = capsys.readouterr()
+    assert out == "" and err.startswith("schedule-guard: error: can't open database") and err.count("\n") == 1
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_cli_export_needs_out(fixture_db, capsys):
+    with pytest.raises(SystemExit) as exit_:
+        cli.main(["export", "--db", str(fixture_db)])
+    assert exit_.value.code == 2
+    assert "the following arguments are required: --out" in capsys.readouterr().err
+
+
+def test_cli_the_exported_file_imports_into_an_empty_project(fixture_db, tmp_path, capsys):
+    sync(fixture_db, FileSource(WEEK_44), clock=CLOCK)
+    with closing(open_db(fixture_db)) as conn:
+        rebaseline(conn, confirm=True, reason="Owner approved", now=NOW)
+    out, again = tmp_path / "out.xml", tmp_path / "again.db"
+    assert cli.main(["export", "--db", str(fixture_db), "--out", str(out)]) == 0
+    assert cli.main(["import", "--db", str(again), str(out)]) == 0
+    assert capsys.readouterr().out.splitlines()[1].startswith("imported Riverbend Clinic: 40 tasks, baselines 0, 1")
+    with closing(open_db(fixture_db)) as first, closing(open_db(again)) as second:
+        for sql in ("SELECT uid, plan_c14n FROM task ORDER BY uid",
+                    "SELECT number, task_uid, xml_c14n FROM baseline_task ORDER BY number, task_uid",
+                    f"SELECT task_uid, {PROGRESS} FROM task_progress ORDER BY task_uid"):
+            assert first.execute(sql).fetchall() == second.execute(sql).fetchall(), sql

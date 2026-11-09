@@ -31,6 +31,9 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
   process exits; under nohup a SIGHUP stays ignored; two exceptions, a stop
   in roughly the first 0.1 s, before the CLI has installed its handlers, and
   a stop inside the FastAPI import: PLAN.md section 7)
+- Export: `uv run schedule-guard export --db <path> --out <new file>` writes
+  the imported MSPDI file with the progress written back; it only reads the
+  database and refuses an existing file
 - Test all: `uv run pytest -q` (Hypothesis is derandomized: the same examples every run)
 - Test one: `uv run pytest -q tests/test_smoke.py::test_cli_version_prints_package_version`
 - Regenerate the MSPDI fixture: `uv run python scripts/make_fixture.py`
