@@ -634,9 +634,10 @@ Decision table:
   Each baseline `rebaseline` added is written as a `<Baseline>` element
   with its stored C14N bytes (Q39). A carriage return in text is written as
   `&#13;`. A name outside any namespace is refused, since ElementTree can't
-  write it under a default one, and so is an existing `--out` file (Q97):
-  it is created exclusively, then a temporary file in the same folder is
-  renamed over it. Imported again, an export turns each Baseline
+  write it under a default one; so is an attribute in the MSPDI namespace,
+  which it would write without its namespace; and so is an existing
+  `--out` file (Q97): it is created exclusively, then a temporary file in
+  the same folder is renamed over it. Imported again, an export turns each Baseline
   `rebaseline` added into an imported one, so the new database's report
   measures variance against Baseline 0 (§7); a re-import is a fresh
   database (Q14).

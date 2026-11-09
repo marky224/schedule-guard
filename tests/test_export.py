@@ -169,6 +169,21 @@ def test_export_refuses_a_name_outside_any_namespace(tmp_path, body):
         export_mspdi(db)
 
 
+@pytest.mark.parametrize("body", [
+    f'<Tasks><Task xmlns:p="{NS}" p:flag="x"><UID>1</UID></Task></Tasks>',
+    f'<Calendars xmlns:p="{NS}" p:kind="standard"/><Tasks><Task><UID>1</UID></Task></Tasks>',
+], ids=["on-a-task", "outside-the-tasks"])
+def test_export_refuses_an_attribute_in_the_mspdi_namespace_with_one_error_line(tmp_path, capsys, body):
+    # ElementTree would write it unprefixed under the default namespace, which moves it out of the namespace.
+    db = small_db(tmp_path, body)
+    out = tmp_path / "out.xml"
+    assert cli.main(["export", "--db", str(db), "--out", str(out)]) == 1
+    stdout, err = capsys.readouterr()
+    assert stdout == "" and err.count("\n") == 1
+    assert err.startswith("schedule-guard: error: the file has an attribute in the MSPDI namespace"), err
+    assert not out.exists()
+
+
 def test_a_utf16_file_is_written_as_utf8_with_the_same_elements(tmp_path):
     xml = tmp_path / "utf16.xml"
     text = FIXTURE.read_text().replace("encoding='utf-8'", "encoding='utf-16'")

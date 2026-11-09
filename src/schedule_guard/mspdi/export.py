@@ -18,10 +18,13 @@ import uses, and changes two things in it:
 
 Every other element, the master schedule and the imported Baselines
 included, is written as parsed, so it stays C14N-identical to the import
-(P7). The file is UTF-8 with MSPDI as the default namespace. The database
-is opened read-only, as the report opens it, and read in one snapshot; this
-module runs no write statement. `write_new_file` then puts the bytes at a
-path that must not exist yet (Q97).
+(P7). The file is UTF-8 with MSPDI as the default namespace, so a file
+with a name in no namespace, or an attribute in the MSPDI namespace, is
+refused: ElementTree can't write the one and would write the other without
+its namespace. The database is opened read-only, as the report opens it,
+and read in one snapshot; this module runs no write statement.
+`write_new_file` then puts the bytes at a path that must not exist yet
+(Q97).
 """
 
 import os
@@ -116,6 +119,13 @@ def export_mspdi(db_path: str | Path) -> MspdiExport:
         written += _write_progress(element, task, progress[task.uid])
         for xml in added_rows.get(task.uid, []):
             _insert(element, SafeET.fromstring(xml, forbid_dtd=True))
+    for node in root.iter():
+        for name in node.attrib:
+            if name.startswith(f"{{{NS}}}"):  # p:flag with p bound to MSPDI; ElementTree would write it as flag
+                raise ExportRefused(
+                    f"the file has an attribute in the MSPDI namespace ({name.rpartition('}')[2]} on"
+                    f" {node.tag.rpartition('}')[2]}), which would lose its namespace with MSPDI as the default one"
+                )
     try:
         data = ET.tostring(root, encoding="utf-8", xml_declaration=True, default_namespace=NS)
     except ValueError as exc:  # ElementTree can't write a name in no namespace under a default one
