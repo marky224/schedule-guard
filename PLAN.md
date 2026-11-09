@@ -646,9 +646,9 @@ Decision table:
   runs removes both and exits 130 with one line; one that comes once the
   file is in place is held, and the export finishes as usual (exit 0).
   Imported again, an export turns each Baseline `rebaseline` added into an
-  imported one, so the new database's report
-  measures variance against Baseline 0 (§7); a re-import is a fresh
-  database (Q14).
+  imported one, so the new database's report measures variance against
+  Baseline 0, or has no variance baseline if the file has no Baseline 0
+  (§7); a re-import is a fresh database (Q14).
 - "Openable in Project" needs MS Project desktop to confirm. The repo owner
   doesn't have it (Q1), so the claim stays **UNVERIFIED** (Challenge C3).
 - Risk: Project may recalculate dependent fields when it opens the file

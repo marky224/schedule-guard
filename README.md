@@ -93,8 +93,9 @@ generated fixture.
 
 The exported file imports into a new database like any MSPDI file, with two
 limits. The baselines `rebaseline` made come back as imported ones, so that
-database's report measures variance against Baseline 0. And import refuses a
-file over 20 MB, which long notes can push an export past.
+database's report measures variance against Baseline 0, or has no variance
+baseline if the file has no Baseline 0. And import refuses a file over 20 MB,
+which long notes can push an export past.
 
 `rerun` processes again what an earlier run captured, as a new run, which is how
 a run that failed or was killed gets finished. It takes a run id from `runs list`,
