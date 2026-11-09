@@ -1,0 +1,33 @@
+[project]
+name = "schedule-guard"
+version = "0.1.0"
+description = "Guard that keeps field progress updates from overwriting an MS Project master schedule or baseline"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "defusedxml",
+    "fastapi",
+    "jinja2",
+    "uvicorn",
+]
+
+[project.scripts]
+schedule-guard = "schedule_guard.cli:main"
+
+[dependency-groups]
+dev = [
+    "httpx",
+    "hypothesis",
+    "pytest",
+]
+
+[build-system]
+requires = ["uv_build>=0.11.13,<0.12"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv]
+exclude-newer = "2026-10-22T00:00:00Z"

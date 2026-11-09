@@ -1,0 +1,102 @@
+"""`schedule-guard import`: store an MSPDI file in an empty database.
+
+The whole file is read and parsed (`read_source`) before anything is
+written, so the CLI does that before it creates the database file. Then the
+project (raw bytes and their SHA-256), the master schedule and every
+baseline go in one transaction that ends by setting
+`project.import_finished_at`; after that the schema refuses new tasks.
+Each task's progress values from the file go into task_progress at version
+0, the version the first update is made against. A
+database holds one project, so a second import is refused (Q14): a changed
+schedule goes into a fresh database. Imported baselines stay unlocked until
+`baseline lock`.
+"""
+
+import hashlib
+import sqlite3
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
+
+from schedule_guard.mspdi.parse import MspdiProject, parse_mspdi, read_mspdi_bytes
+from schedule_guard.store.db import transaction
+
+PROJECT_ID = 1
+
+
+class ImportRefused(Exception):
+    """The database already holds a project."""
+
+
+@dataclass(frozen=True, slots=True)
+class ImportResult:
+    name: str | None
+    tasks: int
+    baselines: tuple[int, ...]
+    source_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class Source:
+    """An MSPDI file, read and parsed, ready to store."""
+
+    data: bytes
+    project: MspdiProject
+
+
+def read_source(path: str | Path) -> Source:
+    data = read_mspdi_bytes(path)
+    return Source(data=data, project=parse_mspdi(data))
+
+
+def import_file(conn: sqlite3.Connection, path: str | Path, *, now: datetime) -> ImportResult:
+    """Read, parse and store the MSPDI file at `path`."""
+    return import_source(conn, read_source(path), now=now)
+
+
+def import_source(conn: sqlite3.Connection, source: Source, *, now: datetime) -> ImportResult:
+    """Store a parsed file; `now` stamps imported_at and the baselines' created_at."""
+    data, project = source.data, source.project
+    name = project.title or project.name
+    sha256 = hashlib.sha256(data).hexdigest()
+    stamp = now.isoformat(timespec="seconds")
+    numbers = tuple(sorted({b.number for t in project.tasks for b in t.baselines}))
+    with transaction(conn):
+        if conn.execute("SELECT 1 FROM project").fetchone():
+            raise ImportRefused("this database already holds a project; import a changed schedule into a new database")
+        conn.execute(
+            "INSERT INTO project (id, name, source_sha256, source_xml, imported_at) VALUES (?, ?, ?, ?, ?)",
+            (PROJECT_ID, name, sha256, data, stamp),
+        )
+        conn.executemany(
+            "INSERT INTO task (project_id, uid, name, wbs, outline_level, is_summary, is_milestone, planned_start,"
+            " planned_finish, planned_duration, planned_work, plan_c14n) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (PROJECT_ID, t.uid, t.name, t.wbs, t.outline_level, int(t.is_summary), int(t.is_milestone),
+                 t.planned_start, t.planned_finish, t.planned_duration, t.planned_work, t.plan_c14n)
+                for t in project.tasks
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO task_progress (project_id, task_uid, version, percent_complete, actual_start, actual_finish,"
+            " remaining_work, notes) VALUES (?, ?, 0, ?, ?, ?, ?, ?)",
+            [
+                (PROJECT_ID, t.uid, t.percent_complete, t.actual_start, t.actual_finish, t.remaining_work, t.notes)
+                for t in project.tasks
+            ],
+        )
+        conn.executemany(
+            "INSERT INTO baseline (project_id, number, created_at) VALUES (?, ?, ?)",
+            [(PROJECT_ID, number, stamp) for number in numbers],
+        )
+        conn.executemany(
+            "INSERT INTO baseline_task (project_id, number, task_uid, start, finish, duration, work, cost, xml_c14n)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            [
+                (PROJECT_ID, b.number, t.uid, b.start, b.finish, b.duration, b.work, b.cost, b.xml_c14n)
+                for t in project.tasks
+                for b in t.baselines
+            ],
+        )
+        conn.execute("UPDATE project SET import_finished_at = ? WHERE id = ?", (stamp, PROJECT_ID))
+    return ImportResult(name=name, tasks=len(project.tasks), baselines=numbers, source_sha256=sha256)

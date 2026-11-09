@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+{% if not imported %}
+<p>No project has been imported into this database.</p>
+{% else %}
+<table>
+  <tr><th>Project</th><td>{{ project.name or "(no name)" }}</td></tr>
+  <tr><th>Imported</th><td>{{ imported.imported_at }}</td></tr>
+  <tr><th>Source SHA-256</th><td>{{ imported.source_sha256 }}</td></tr>
+  <tr><th>Tasks</th><td>{{ task_count }} ({{ summary_count }} summary tasks)</td></tr>
+  <tr><th>Overdue</th><td><a href="/overdue">{{ overdue_count }}</a></td></tr>
+  <tr><th>Milestones reached</th><td><a href="/milestones">{{ reached_count }} of {{ milestone_count }}</a></td></tr>
+  <tr><th>Applied updates</th><td>{{ applied_count }}</td></tr>
+  <tr><th>Sync runs</th><td><a href="/runs">{{ run_count }}</a>{% if last_run %}; the last {{ last_run.trigger }} run, {{ last_run.started_at }}, is {{ last_run.status }}{% endif %}</td></tr>
+</table>
+<h2>Baselines</h2>
+<table>
+  <tr><th>Number</th><th>Created</th><th>Locked</th><th>Locked by</th><th>Reason</th></tr>
+  {% for b in baselines %}
+  <tr><td class="number">{{ b.number }}</td><td>{{ b.created_at }}</td><td>{{ b.locked_at or "not locked" }}</td><td>{{ b.locked_by or "" }}</td><td>{{ b.reason or "" }}</td></tr>
+  {% else %}
+  <tr><td colspan="5">No baselines.</td></tr>
+  {% endfor %}
+</table>
+<h2>Conflicts by reason</h2>
+<table>
+  <tr><th>Reason</th><th>Open</th><th>Dismissed</th></tr>
+  {% for c in conflict_counts %}
+  <tr><td>{{ c.reason_code }}</td><td class="number">{{ c.open }}</td><td class="number">{{ c.dismissed }}</td></tr>
+  {% else %}
+  <tr><td colspan="3">No conflicts.</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+{% endblock %}

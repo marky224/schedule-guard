@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<p>Variance is the planned finish minus baseline {{ baseline if baseline is not none else "(none)" }}'s, in calendar days.</p>
+<table>
+  <tr><th>UID</th><th>WBS</th><th>Name</th><th>Planned finish</th><th>Baseline finish</th><th>Finish variance</th><th>% complete</th><th>Actual finish</th><th>Status</th></tr>
+  {% for t in tasks %}
+  <tr><td class="number">{{ t.uid }}</td><td>{{ t.wbs or "" }}</td><td>{{ t.name or "" }}</td><td>{{ t.planned_finish or "" }}</td><td>{{ t.baseline_finish or "" }}</td><td class="number">{{ t.finish_variance or "" }}</td><td class="number">{{ t.percent_complete if t.percent_complete is not none else "" }}</td><td>{{ t.actual_finish or "" }}</td><td>{{ t.milestone_status }}</td></tr>
+  {% else %}
+  <tr><td colspan="9">No milestones.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}

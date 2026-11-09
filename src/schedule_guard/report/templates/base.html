@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>{{ title }} · schedule-guard</title>
+<style>
+  body { font: 15px/1.4 system-ui, sans-serif; margin: 1.5rem; color: #1b1f24; }
+  nav a { margin-right: 1rem; }
+  table { border-collapse: collapse; margin: 0.5rem 0 1.5rem; }
+  th, td { border-bottom: 1px solid #d0d7de; padding: 0.3rem 0.6rem; text-align: left; vertical-align: top; }
+  th { background: #f6f8fa; }
+  td.number { text-align: right; font-variant-numeric: tabular-nums; }
+  .notes, .detail { white-space: pre-wrap; max-width: 36rem; }
+  .muted { color: #57606a; }
+</style>
+</head>
+<body>
+<nav>
+  <a href="/">Summary</a>
+  <a href="/tasks">Tasks</a>
+  <a href="/overdue">Overdue</a>
+  <a href="/milestones">Milestones</a>
+  <a href="/conflicts">Conflicts</a>
+  <a href="/runs">Runs</a>
+</nav>
+<p class="muted">Read-only report{% if project %} for {{ project.name or "(no name)" }}{% endif %}. Today is {{ today }} (America/Chicago).</p>
+<h1>{{ title }}</h1>
+{% block content %}{% endblock %}
+</body>
+</html>

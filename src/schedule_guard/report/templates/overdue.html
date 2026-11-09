@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block content %}
+<p>Leaf tasks whose planned finish is before today, {{ today }}, and whose % complete is under 100. Summary tasks are left out: their % complete is as imported, since Project rolls it up from their subtasks, so they are listed on <a href="/tasks">Tasks</a> only.</p>
+<table>
+  <tr><th>UID</th><th>WBS</th><th>Name</th><th>Planned finish</th><th>% complete</th><th>Actual start</th><th>Remaining work</th></tr>
+  {% for t in tasks %}
+  <tr><td class="number">{{ t.uid }}</td><td>{{ t.wbs or "" }}</td><td>{{ t.name or "" }}</td><td>{{ t.planned_finish }}</td><td class="number">{{ t.percent_complete if t.percent_complete is not none else "" }}</td><td>{{ t.actual_start or "" }}</td><td>{{ t.remaining_work or "" }}</td></tr>
+  {% else %}
+  <tr><td colspan="7">No task is overdue.</td></tr>
+  {% endfor %}
+</table>
+{% endblock %}
