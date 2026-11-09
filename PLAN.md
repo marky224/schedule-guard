@@ -823,6 +823,22 @@ were recorded on 2026-10-29. Each question is followed by its answer.
     "2026-10-22T00:00:00Z"` in `pyproject.toml`; packages uploaded after
     the cutoff are not used.
 
+M7 added two decisions on 2026-11-08. They keep the numbers they were asked
+under, so the list goes on at 39 and then at 97.
+
+39. **The baselines `rebaseline` added, in the export?** (2026-11-08) Each
+    one is written as a `<Baseline>` element after the task's last
+    Baseline, in number order, with the bytes `baseline_task.xml_c14n`
+    holds. Changes §9.7 and P7 (§8).
+
+<!-- a list of its own, so the number shows as 97 -->
+
+97. **Export to an `--out` file that already exists?** (2026-11-08)
+    Refused, and the file is left as it was: `--out` is created
+    exclusively, the bytes go to a temporary file in the same folder, and
+    that file is renamed over `--out`. There is no `--force`. Changes §2
+    and §9.7.
+
 ## 16. Field-log post outline (written in M15)
 
 1. The problem: a field app silently moved a planned finish date.
