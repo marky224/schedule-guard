@@ -107,11 +107,13 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
   localhost (400 for any other, so a rebound domain can't read it).
   Ctrl+C, SIGTERM or SIGHUP stops it: exit 0 once it listens, one line on
   stderr and exit 130 before, also under `uv run`: a stop within 1 s of the
-  first is the same stop (one exception, a stop inside the FastAPI import:
-  PLAN.md section 7). Either way the demo's
-  temporary directory (no `--db`) goes then. A SIGHUP that was already
-  ignored (nohup) stays ignored; a SIGKILL can't be caught and leaves the
-  directory.
+  first is the same stop (two exceptions, a stop in roughly the first 0.1 s,
+  before the CLI has installed its handlers, and a stop inside the FastAPI
+  import: PLAN.md section 7). Either way the demo's temporary directory (no
+  `--db`) goes then, and once the command has ended after a stop, further
+  stop signals are ignored until the process exits. A SIGHUP that was
+  already ignored (nohup) stays ignored; a SIGKILL can't be caught and
+  leaves the directory.
 - Phase 1 is a local CLI with no authentication: anyone with shell access to
   the host and the DB file can run every command. The roles above are
   conventions, not enforced checks. Whoever runs a command, the DB triggers

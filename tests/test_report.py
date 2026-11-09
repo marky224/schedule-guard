@@ -646,6 +646,8 @@ def wait(*args, **kwargs):
 tempfile.TemporaryDirectory._rmtree = staticmethod(rmtree)
 if sys.argv[1] == "before-listening":
     cli.build_demo = wait
+if len(sys.argv) > 2:
+    cli.REPEAT_WINDOW = float(sys.argv[2])  # 0: every stop after the first is a later one, which forces the exit
 raise SystemExit(cli.main(["demo", "--port", "0"]))
 """
 
@@ -670,6 +672,128 @@ def test_cli_demo_removes_its_directory_even_when_a_second_stop_comes_as_it_does
         assert (child.returncode, err) == (130, b"schedule-guard: stopped before the report started serving\n")
     else:
         assert child.returncode == 0 and "Finished server process" in text and "stopped before" not in text, text
+
+
+@pytest.mark.parametrize("when", ["before-listening", "after-listening"])
+def test_cli_demo_removes_its_directory_even_when_a_later_stop_comes_as_it_does(tmp_path, when):
+    child = subprocess.Popen(
+        [sys.executable, "-c", SECOND_STOP_AT_REMOVAL, when, "0"], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env={**os.environ, "TMPDIR": str(tmp_path)}, preexec_fn=start_with,
+    )
+    try:
+        found, before = read_until(child, rb"waiting\n" if when == "before-listening" else rb"Uvicorn running on")
+        assert found, before
+        child.send_signal(signal.SIGINT)
+        _, err = child.communicate(timeout=60)
+    finally:
+        child.kill()
+    text = (before + err).decode()
+    assert list(tmp_path.iterdir()) == []  # the stop waited for the removal, though no window dropped it
+    assert "Traceback" not in text, text
+    assert child.returncode in (0, 130), text  # not ended by the signal; the later stop forced the exit
+
+
+@pytest.mark.parametrize("command", ["report", "demo"])
+def test_cli_a_second_sigint_as_it_shuts_down_is_the_same_stop_exit_0_and_no_traceback(week_44, tmp_path, command):
+    args = ["report", "--db", str(week_44)] if command == "report" else ["demo"]
+    with Served(*args, env={**os.environ, "TMPDIR": str(tmp_path)}) as served:
+        served.process.send_signal(signal.SIGINT)
+        found, err = read_until(served.process, rb"Shutting down")
+        served.err += err
+        assert found and served.process.poll() is None, served.err.decode()  # uvicorn sleeps 0.1 s after the line
+        code, err = served.stop(signal.SIGINT)  # without the window, uvicorn would take it to force the exit
+    assert code == 0, err
+    assert "Traceback" not in err and "stopped before" not in err, err
+    assert "Finished server process" in err
+    assert list(tmp_path.iterdir()) == []  # and the demo's directory is gone
+
+
+# WAIT_IN with a second SIGINT raised as the child writes its one line, so the first stop is still being handled.
+SECOND_STOP_AT_THE_LINE = """
+import signal
+import sys
+
+
+class Stderr:
+    def __init__(self, stream):
+        self.stream = stream
+        self.raised = False
+
+    def write(self, text):
+        if not self.raised and text.startswith("schedule-guard: stopped"):
+            self.raised = True
+            signal.raise_signal(signal.SIGINT)
+        return self.stream.write(text)
+
+    def __getattr__(self, name):
+        return getattr(self.stream, name)
+
+
+sys.stderr = Stderr(sys.stderr)
+""" + WAIT_IN
+
+
+@pytest.mark.parametrize(("command", "point"), [("report", "create_app"), ("demo", "build")])
+def test_cli_a_second_sigint_as_it_stops_before_it_listens_keeps_one_line_and_exit_130(week_44, tmp_path, command,
+                                                                                       point):
+    args = ["report", "--db", str(week_44)] if command == "report" else ["demo"]
+    child = subprocess.Popen(
+        [sys.executable, "-c", SECOND_STOP_AT_THE_LINE, point, *args], stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, env={**os.environ, "TMPDIR": str(tmp_path)}, preexec_fn=start_with,
+    )
+    try:
+        found, before = read_until(child, rb"waiting\n")
+        assert found, before
+        child.send_signal(signal.SIGINT)
+        _, err = child.communicate(timeout=60)
+    finally:
+        child.kill()
+    assert child.returncode == 130, err
+    assert err == b"schedule-guard: stopped before the report started serving\n"
+    assert list(tmp_path.iterdir()) == []
+
+
+# The demo, then one more stop signal raised once cli.main has returned from the first, as `uv run`'s repeat can land.
+STOP_AFTER_IT_RETURNED = """
+import signal
+import sys
+import time
+from schedule_guard import cli
+
+
+def wait(*args, **kwargs):
+    print("waiting", file=sys.stderr, flush=True)
+    while True:
+        time.sleep(0.01)
+
+
+if sys.argv[1] == "before-listening":
+    cli.build_demo = wait
+code = cli.main(["demo", "--port", "0"])
+signal.raise_signal(signal.Signals[sys.argv[2]])
+raise SystemExit(code)
+"""
+
+
+@pytest.mark.parametrize("signum", STOP_SIGNALS, ids=lambda signum: signum.name)
+@pytest.mark.parametrize(("when", "code"), [("before-listening", 130), ("after-listening", 0)],
+                         ids=["before-listening", "after-listening"])
+def test_cli_a_stop_after_the_command_returned_from_one_doesnt_end_the_process(tmp_path, when, code, signum):
+    child = subprocess.Popen(
+        [sys.executable, "-c", STOP_AFTER_IT_RETURNED, when, signum.name], stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, env={**os.environ, "TMPDIR": str(tmp_path)}, preexec_fn=start_with,
+    )
+    try:
+        found, before = read_until(child, rb"waiting\n" if when == "before-listening" else rb"Uvicorn running on")
+        assert found, before
+        child.send_signal(signum)
+        _, err = child.communicate(timeout=60)
+    finally:
+        child.kill()
+    text = (before + err).decode()
+    assert child.returncode == code, text  # it ignored the signal; the default would end the process by it
+    assert "Traceback" not in text, text
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_a_stop_within_1_s_of_the_first_is_a_repeat_and_a_later_one_is_not(monkeypatch):

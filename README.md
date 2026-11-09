@@ -143,10 +143,15 @@ Ctrl+C, SIGTERM or SIGHUP stops `report` and `demo`: exit 0 once the server
 listens, or one line on stderr and exit 130 before it does. That holds under
 `uv run` too, which hands the command a terminal's Ctrl+C twice: a stop signal
 within 1 s of the first is the same stop. A second Ctrl+C more than 1 s later
-forces the exit. Either way the demo's temporary directory is removed. One case
-still differs: a stop that lands inside the FastAPI and pydantic import can
-print a traceback and exit 1, though the directory is still removed. A SIGKILL
-can't be caught and leaves it, and under `nohup` a SIGHUP stays ignored.
+forces the exit. Either way the demo's temporary directory is removed, and once
+the command has ended after a stop, further stop signals are ignored until the
+process exits. Two cases still differ. A stop in roughly the first 0.1 s, before
+the CLI has installed its handlers, ends the process by the signal: SIGINT with
+Python's KeyboardInterrupt traceback, SIGTERM or SIGHUP with no line. No demo
+directory exists yet then. A stop that lands inside the FastAPI and pydantic
+import can print a traceback and exit 1, though the directory is still removed.
+A SIGKILL can't be caught and leaves it, and under `nohup` a SIGHUP stays
+ignored.
 
 ### Tests
 

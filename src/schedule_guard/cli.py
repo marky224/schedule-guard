@@ -279,7 +279,9 @@ def _stoppable(command: Callable[[argparse.Namespace], int]) -> Callable[[argpar
     SIGTERM raise KeyboardInterrupt here, so `finally` and `with` exits still
     run (SIGTERM's default would end the process first). SIGHUP (the
     terminal closed) is raised again as SIGTERM, unless it is already ignored
-    (nohup); so is an ignored SIGINT (a background job) left alone.
+    (nohup). An ignored SIGINT (a background job) is left alone too, but only
+    before and after serving: while it serves, uvicorn installs its own SIGINT
+    handler either way.
 
     A repeat within REPEAT_WINDOW of the first stop is the same stop and is
     dropped, here and in _serve's wrapper of uvicorn's handler, since `uv run`

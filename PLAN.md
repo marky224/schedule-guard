@@ -130,7 +130,7 @@ CLI (Phase 1):
 | `schedule-guard sync daily --db <path> --source file:<path>` | Same as `sync now`, labelled `daily`. The timer calls this one. |
 | `schedule-guard rerun --db <path> <run-id>` | Reprocesses the source items that run captured. Keys already decided count as duplicates. Records a new run with `rerun_of`. Refuses a run that captured nothing. |
 | `schedule-guard runs list --db <path>` / `conflicts list --db <path> [--all]` / `conflicts dismiss --db <path> <id> --note "..."` | Inspect runs and conflicts. Dismiss a conflict with a note; it is never applied. |
-| `schedule-guard report --db <path> [--port 8000]` | Serves the read-only HTML report on 127.0.0.1 only. Ctrl+C, SIGTERM or SIGHUP stops it: exit 0 once it listens, 130 before, also under `uv run` (one exception: §7). |
+| `schedule-guard report --db <path> [--port 8000]` | Serves the read-only HTML report on 127.0.0.1 only. Ctrl+C, SIGTERM or SIGHUP stops it: exit 0 once it listens, 130 before, also under `uv run` (two exceptions: §7). |
 | `schedule-guard demo [--db <path>] [--port 8000]` | Builds a new demo DB from the fixture and scripted updates (some applied, some conflicts), then serves the report on it. The path must not exist; without `--db` the DB lives in a temporary directory, removed when the demo stops on Ctrl+C, SIGTERM or SIGHUP (a SIGKILL leaves it). |
 | `schedule-guard export <out.xml>` | Phase 2 (offline). Writes MSPDI with progress applied and the baseline untouched. |
 
@@ -406,10 +406,14 @@ Rules that hold no matter which check fires:
   second Ctrl+C more than 1 s later forces the exit, as uvicorn does. The
   demo's temporary directory (no `--db`) is removed with the three signals
   blocked, so a stop can't cut that short, and once the command has ended
-  after a stop they are ignored until the process exits. One case still
-  differs: a stop that lands inside the FastAPI and pydantic import
-  (pydantic-core turns the KeyboardInterrupt into its own error) prints a
-  traceback and exits 1; the directory is still removed. A SIGHUP that was
+  after a stop they are ignored until the process exits. Two cases still
+  differ. A stop in roughly the first 0.1 s, during interpreter start-up
+  and the CLI's imports, before it has installed its handlers, ends the
+  process by the signal: SIGINT with Python's KeyboardInterrupt traceback,
+  SIGTERM or SIGHUP with no line; no demo directory exists yet. A stop that
+  lands inside the FastAPI and pydantic import (pydantic-core turns the
+  KeyboardInterrupt into its own error) prints a traceback and exits 1; the
+  directory is still removed. A SIGHUP that was
   already ignored (nohup) stays ignored, so the server keeps running. A
   SIGKILL can't be caught and leaves the directory in the system's
   temporary directory.

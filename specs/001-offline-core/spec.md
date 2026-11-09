@@ -177,9 +177,14 @@ or any baseline.
   and exit 130 before it listens, also under `uv run`, which delivers a
   terminal's Ctrl+C twice: a stop signal within 1 s of the first is the
   same stop, and one more than 1 s later forces the exit. The demo's
-  temporary directory is removed either way. One case still differs: a
-  stop inside the FastAPI and pydantic import can print a traceback and
-  exit 1. A SIGHUP that was already ignored (nohup) stays ignored.
+  temporary directory is removed either way, and once the command has
+  ended after a stop, further stop signals are ignored until the process
+  exits. Two cases still differ: a stop in roughly the first 0.1 s, before
+  the CLI has installed its handlers, ends the process by the signal
+  (SIGINT with Python's KeyboardInterrupt traceback, SIGTERM or SIGHUP
+  with no line) before any demo directory exists; and a stop inside the
+  FastAPI and pydantic import can print a traceback and exit 1. A SIGHUP
+  that was already ignored (nohup) stays ignored.
 - **US6 Hygiene and CI (M6).** A test scans tracked files for GUID-shaped
   strings outside an explicit fixture allowlist, tenant or secret
   assignments, appSettings key and value pairs and XML elements with a value
