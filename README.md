@@ -167,11 +167,17 @@ the CLI has installed its handlers, comes before any demo directory exists.
 SIGTERM or SIGHUP then ends the process by the signal with no line. SIGINT
 depends on when it lands: in the first few milliseconds, before Python has its
 own handler, it ends the process by the signal with no output; while Python
-imports its `site` module it exits 1 with "Fatal Python error:
-init_import_site"; after that it ends the process by the signal with Python's
-KeyboardInterrupt traceback. (Measured on one Linux machine: 0–4 ms, 5–6 ms,
-then from 7 ms until the CLI's handlers were in, at about 60 ms.) A stop that lands inside the FastAPI and pydantic
-import can print a traceback and exit 1, though the directory is still removed.
+imports its `site` module it exits 1 with a "Fatal Python error" (mostly
+init_import_site); after that it mostly ends the process by the signal with
+Python's KeyboardInterrupt traceback. Now and then, most often just after the
+`site` import, the interrupt lands in start-up code whose errors Python only
+prints ("Exception ignored in: ...", then KeyboardInterrupt), and the command
+runs on; `demo` then builds its database and serves. (Measured on one Linux
+machine: about 0–4 ms, about 5–6 ms, then from about 7 ms until the CLI's
+handlers were in, at about 60–70 ms; the command ran on in about 2 runs in 100
+between about 6 and 10 ms, and once at 30 ms.) A stop that lands inside the
+FastAPI and pydantic import can print a traceback and exit 1, though the
+directory is still removed.
 A SIGKILL can't be caught and leaves it, and under `nohup` a SIGHUP stays
 ignored.
 

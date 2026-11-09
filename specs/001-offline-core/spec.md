@@ -183,10 +183,12 @@ or any baseline.
   the CLI has installed its handlers, comes before any demo directory
   exists, and SIGTERM or SIGHUP then ends the process by the signal with no
   line, while SIGINT ends it by the signal with no output before Python has
-  its own handler (0–4 ms measured), exits 1 with "Fatal Python error:
-  init_import_site" while Python imports its `site` module (5–6 ms), and
-  after that ends it by the signal with Python's KeyboardInterrupt
-  traceback; and a stop inside the
+  its own handler (about 0–4 ms measured), exits 1 with a "Fatal Python
+  error" (mostly init_import_site) while Python imports its `site` module
+  (about 5–6 ms), and after that mostly ends it by the signal with Python's
+  KeyboardInterrupt traceback; now and then, most often just after the
+  `site` import, start-up code only prints the interrupt ("Exception
+  ignored in: ...") and the command runs on; and a stop inside the
   FastAPI and pydantic import can print a traceback and exit 1. A SIGHUP
   that was already ignored (nohup) stays ignored.
 - **US6 Hygiene and CI (M6).** A test scans tracked files for GUID-shaped
