@@ -470,8 +470,9 @@ Plus:
   with the same name (a placeholder in a command doesn't), PRIVATE KEY blocks
   (PGP ones too), and files with any of the seven key suffixes `.gitignore`
   lists. A file in UTF-16 (a BOM, or bytes that alternate between mostly NUL
-  and mostly not) is decoded as such first. Only fixture GUIDs on an explicit
-  allowlist may pass.
+  and mostly not) is scanned both as UTF-16 and as UTF-8, so an ASCII line
+  in it is found too; the same file, line and kind from both is one finding.
+  Only fixture GUIDs on an explicit allowlist may pass.
 - Phase 2 Graph code is tested against recorded JSON responses (paging,
   deltaLink, 410 Gone, duplicate items in the delta feed, deleted items, 412
   on if-match). No test makes a network call.

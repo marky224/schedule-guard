@@ -3,9 +3,10 @@
 The scan reads what `git ls-files` lists, so it needs a git checkout: on a
 copy with no .git it errors, and can't pass without having looked. A file
 that starts with a UTF-16 BOM, or whose bytes alternate between mostly NUL
-and mostly not, is read as UTF-16 before any rule runs. A finding names the file and line, never
-the value. The planted values below are built from parts, since this file is
-tracked too.
+and mostly not, is scanned as UTF-16 and as UTF-8, so an ASCII line in it is
+found too; a line both decodes flag counts once. A finding names the file
+and line, never the value. The planted values below are built from parts,
+since this file is tracked too.
 """
 
 import codecs
@@ -57,15 +58,19 @@ def findings(root: Path, names: list[str], guid_allowlist: frozenset[str] = GUID
         path = root / name
         if not path.is_file():  # deleted from the working tree, not yet from the index
             continue
-        for number, line in enumerate(text(path.read_bytes()).splitlines(), 1):
-            if name not in guid_allowlist and GUID.search(line):
-                found.append(f"{name}:{number}: GUID")
-            if ASSIGNMENT.search(line) or SETTING.search(line):
-                found.append(f"{name}:{number}: tenant or secret assignment")
-            if ELEMENT.search(line):
-                found.append(f"{name}:{number}: tenant or secret element")
-            if PRIVATE_KEY.search(line):
-                found.append(f"{name}:{number}: private key")
+        data = path.read_bytes()
+        here = []
+        for decoded in dict.fromkeys([text(data), data.decode("utf-8", "replace")]):  # one, unless text() read UTF-16
+            for number, line in enumerate(decoded.splitlines(), 1):
+                if name not in guid_allowlist and GUID.search(line):
+                    here.append(f"{name}:{number}: GUID")
+                if ASSIGNMENT.search(line) or SETTING.search(line):
+                    here.append(f"{name}:{number}: tenant or secret assignment")
+                if ELEMENT.search(line):
+                    here.append(f"{name}:{number}: tenant or secret element")
+                if PRIVATE_KEY.search(line):
+                    here.append(f"{name}:{number}: private key")
+        found.extend(dict.fromkeys(here))  # the same file, line and kind from both decodes is one finding
     return found
 
 
@@ -142,11 +147,19 @@ def git_repo(root: Path, *planted: tuple[str, str | bytes]) -> None:
     ("notes.txt", f"{key_header('PGP PRIVATE KEY BLOCK')}\n", "notes.txt:1: private key"),
     ("web.config", f'<appSettings>\n  <add key="{SECRET_CAMEL}" value="abc123" />\n</appSettings>\n',
      "web.config:2: tenant or secret assignment"),
+    ("blob.bin", b"\x01\x00" * 300 + f"\n{SECRET_WORD}=abc123\n".encode(), "blob.bin:2: tenant or secret assignment"),
+    ("notes.txt", codecs.BOM_UTF16_LE + "Notes for the app\n".encode("utf-16-le")
+     + f"{SECRET_WORD}=abc123\n".encode(), "notes.txt:2: tenant or secret assignment"),
+    ("settings.env", f"{SECRET_WORD}=abc123\n".encode() + "Notes for the app\n".encode("utf-16-le") * 20,
+     "settings.env:1: tenant or secret assignment"),
+    ("notes.txt", PLANTED_GUID.encode() + f" {PLANTED_GUID}\n".encode("utf-16-le"), "notes.txt:1: GUID"),
 ], ids=["guid", "upper-guid", "secret", "env-secret", "env-tenant-id", "yaml-tenant", "json-tenant", "pem", "pfx", "p12",
         "key", "cer", "crt", "der", "private-key", "rsa-private-key", "ec-private-key", "openssh-private-key",
         "encrypted-private-key", "xml-secret", "xml-tenant-with-attribute", "xml-namespaced-secret", "utf16-bom-guid",
         "utf16le-secret", "utf16be-tenant-id", "nul-padded-secret", "nul-padded-guid", "sqlite-header-secret",
-        "acronym-tenant-id", "acronym-json-secret", "acronym-env-secret", "pgp-private-key", "app-setting-secret"])
+        "acronym-tenant-id", "acronym-json-secret", "acronym-env-secret", "pgp-private-key", "app-setting-secret",
+        "alternating-bytes-then-ascii-secret", "utf16-then-ascii-secret", "ascii-secret-then-utf16",
+        "guid-in-both-decodes"])
 def test_a_planted_file_in_a_git_repo_is_found(tmp_path, name, text, found):
     git_repo(tmp_path, (name, text))
     assert findings(tmp_path, tracked(tmp_path)) == [found]

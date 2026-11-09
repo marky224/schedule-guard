@@ -190,7 +190,8 @@ or any baseline.
   assignments, appSettings key and value pairs and XML elements with a value
   and a closing tag (camelCase and acronym-prefixed names too), PRIVATE KEY
   blocks (PGP ones too), and key files (the seven suffixes `.gitignore`
-  lists); a UTF-16 file is decoded as such first, and a NUL-padded one isn't. A GitHub Actions workflow runs
+  lists); a UTF-16 file is scanned both as UTF-16 and as UTF-8 (one
+  finding per line and kind), and a NUL-padded one as UTF-8 only. A GitHub Actions workflow runs
   `uv run --locked pytest -q` (Q15), so a stale `uv.lock` fails it; its
   config gets a max-effort review.
 
