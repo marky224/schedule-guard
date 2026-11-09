@@ -451,7 +451,7 @@ coming back as duplicates.
 | P4 | **All or nothing.** Every update gets exactly one outcome. An update with any forbidden field changes no progress field. |
 | P5 | **Stale never applies.** No update with `made_against_version` ≠ current version at decision time is ever applied. |
 | P6 | **Rerun equivalence.** `rerun <id>` after a run produces only duplicates. After a simulated crash mid-run, it reaches the same final state as an uninterrupted run. |
-| P7 | Phase 2: **export round-trip.** Every `<Baseline>` subtree of the exported MSPDI is C14N-identical to the import, and so is every non-progress task element. |
+| P7 | Phase 2: **export round-trip.** Every imported `<Baseline>` subtree of the exported MSPDI is C14N-identical to the import, each `<Baseline>` that `rebaseline` added is C14N-identical to its `baseline_task.xml_c14n` (Q39), and every non-progress task element is C14N-identical to the import. |
 
 Plus:
 
