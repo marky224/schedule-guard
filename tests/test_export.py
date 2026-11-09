@@ -3,12 +3,16 @@
 import ast
 import hashlib
 import re
+import signal
+import subprocess
+import sys
 from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
 import pytest
+from test_report import read_until, start_with
 
 from schedule_guard import cli
 from schedule_guard.baselines import rebaseline
@@ -347,3 +351,47 @@ def test_cli_the_exported_file_imports_into_an_empty_project(fixture_db, tmp_pat
                     "SELECT number, task_uid, xml_c14n FROM baseline_task ORDER BY number, task_uid",
                     f"SELECT task_uid, {PROGRESS} FROM task_progress ORDER BY task_uid"):
             assert first.execute(sql).fetchall() == second.execute(sql).fetchall(), sql
+
+
+# A child that runs cli.main and waits in write_new_file once --out exists and the temporary file holds the bytes.
+
+WAIT_IN_FSYNC = """
+import os
+import sys
+import time
+from schedule_guard import cli
+
+
+def wait(fd):
+    print("waiting", file=sys.stderr, flush=True)
+    while True:
+        time.sleep(0.01)
+
+
+os.fsync = wait
+raise SystemExit(cli.main(sys.argv[1:]))
+"""
+
+
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM, signal.SIGHUP], ids=lambda signum: signum.name)
+def test_cli_export_stopped_while_it_writes_leaves_no_file_and_prints_one_line(fixture_db, tmp_path, signum):
+    folder = tmp_path / "out"
+    folder.mkdir()
+    args = ["export", "--db", str(fixture_db), "--out", str(folder / "progress.xml")]
+    child = subprocess.Popen(
+        [sys.executable, "-c", WAIT_IN_FSYNC, *args], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        preexec_fn=start_with,
+    )
+    try:
+        found, before = read_until(child, rb"waiting\n")
+        assert found and before == b"waiting\n", before
+        written = sorted(folder.iterdir())
+        assert [p.name for p in written][1:] == ["progress.xml"] and written[0].name.startswith(".schedule-guard-")
+        child.send_signal(signum)
+        stdout, err = child.communicate(timeout=60)
+    finally:
+        child.kill()
+    assert (child.returncode, stdout) == (130, b""), err
+    assert err == b"schedule-guard: stopped before the export finished; no partial file is left\n"
+    assert list(folder.iterdir()) == []  # neither the empty --out nor the temporary file
+    assert cli.main(args) == 0  # so the next export to that path isn't refused

@@ -184,17 +184,6 @@ def _rebaseline(args: argparse.Namespace) -> int:
     return 0
 
 
-def _export(args: argparse.Namespace) -> int:
-    exported = export_mspdi(args.db)  # a refused export leaves no file behind
-    write_new_file(args.out, exported.data)
-    added = ", ".join(map(str, exported.added_baselines)) or "none"
-    print(
-        f"exported {_printable(exported.name or '(no name)')}: {exported.tasks} tasks, progress written on"
-        f" {exported.progress_tasks}, baselines added by rebaseline: {added}; wrote {_printable(str(args.out))}"
-    )
-    return 0
-
-
 def _sync(args: argparse.Namespace) -> int:
     kind, _, path = args.source.partition(":")
     if kind != "file" or not path:
@@ -270,7 +259,8 @@ def _conflicts_dismiss(args: argparse.Namespace) -> int:
 
 STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 REPEAT_WINDOW = 1.0  # seconds; `uv run` hands a terminal's one Ctrl+C to the command twice, about 0.2 s apart
-_first_stop: float | None = None  # when the running report or demo saw its first stop signal
+_first_stop: float | None = None  # when the running report, demo or export saw its first stop signal
+_NOT_SERVING = "stopped before the report started serving"
 
 
 def _repeat_stop() -> bool:
@@ -294,8 +284,11 @@ def _as_sigterm(signum: int, frame: object) -> None:
     signal.raise_signal(signal.SIGTERM)
 
 
-def _stoppable(command: Callable[[argparse.Namespace], int]) -> Callable[[argparse.Namespace], int]:
-    """Make SIGINT, SIGTERM and SIGHUP stop `command` once, and let cleanup finish.
+Command = Callable[[argparse.Namespace], int]
+
+
+def _stoppable(stopped: str) -> Callable[[Command], Command]:
+    """Make SIGINT, SIGTERM and SIGHUP stop the command once, let cleanup finish, and print `stopped`.
 
     uvicorn catches SIGINT and SIGTERM while it serves, shuts down, puts the
     old handlers back and raises the signal again; outside that, SIGINT and
@@ -314,36 +307,41 @@ def _stoppable(command: Callable[[argparse.Namespace], int]) -> Callable[[argpar
     and a repeat landing then would end the process by the signal. A SIGKILL
     can't be caught.
 
-    A stop before the server listens reaches here as KeyboardInterrupt: one
-    line on stderr and exit 130.
+    A stop before the server listens, or before export has its file in
+    place (write_new_file has then removed what it wrote; export never
+    serves), reaches here as KeyboardInterrupt: `stopped` as one line on
+    stderr and exit 130.
     """
 
-    @wraps(command)
-    def run(args: argparse.Namespace) -> int:
-        global _first_stop
-        _first_stop = None
-        previous = {signal.SIGTERM: signal.signal(signal.SIGTERM, _stop)}
-        for signum, handler in ((signal.SIGINT, _stop), (signal.SIGHUP, _as_sigterm)):
-            if signal.getsignal(signum) is not signal.SIG_IGN:
-                previous[signum] = signal.signal(signum, handler)
-        try:
-            return command(args)
-        except KeyboardInterrupt:
-            print("schedule-guard: stopped before the report started serving", file=sys.stderr)
-            return 130
-        finally:
-            for signum, handler in previous.items():
-                signal.signal(signum, handler if _first_stop is None else signal.SIG_IGN)
+    def decorate(command: Command) -> Command:
+        @wraps(command)
+        def run(args: argparse.Namespace) -> int:
+            global _first_stop
+            _first_stop = None
+            previous = {signal.SIGTERM: signal.signal(signal.SIGTERM, _stop)}
+            for signum, handler in ((signal.SIGINT, _stop), (signal.SIGHUP, _as_sigterm)):
+                if signal.getsignal(signum) is not signal.SIG_IGN:
+                    previous[signum] = signal.signal(signum, handler)
+            try:
+                return command(args)
+            except KeyboardInterrupt:
+                print(f"schedule-guard: {stopped}", file=sys.stderr)
+                return 130
+            finally:
+                for signum, handler in previous.items():
+                    signal.signal(signum, handler if _first_stop is None else signal.SIG_IGN)
 
-    return run
+        return run
+
+    return decorate
 
 
-@_stoppable
+@_stoppable(_NOT_SERVING)
 def _serve_report(args: argparse.Namespace) -> int:
     return _serve(args.db, _now, args.port)
 
 
-@_stoppable
+@_stoppable(_NOT_SERVING)
 def _demo(args: argparse.Namespace) -> int:
     if args.db is not None:
         return _build_and_serve_demo(args.db, args.port)
@@ -384,6 +382,18 @@ def _serve(db: Path, clock: Clock, port: int) -> int:
     except KeyboardInterrupt:  # uvicorn has shut down and raised the stop signal again, after the window
         if not report.started:  # it stopped before it listened
             raise
+    return 0
+
+
+@_stoppable("stopped before the export finished; no partial file is left")
+def _export(args: argparse.Namespace) -> int:
+    exported = export_mspdi(args.db)  # a refused export leaves no file behind
+    write_new_file(args.out, exported.data)
+    added = ", ".join(map(str, exported.added_baselines)) or "none"
+    print(
+        f"exported {_printable(exported.name or '(no name)')}: {exported.tasks} tasks, progress written on"
+        f" {exported.progress_tasks}, baselines added by rebaseline: {added}; wrote {_printable(str(args.out))}"
+    )
     return 0
 
 

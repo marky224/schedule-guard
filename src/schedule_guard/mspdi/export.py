@@ -173,7 +173,8 @@ def write_new_file(path: str | Path, data: bytes) -> None:
     symlink (a dangling one too) is refused and left as it was. The bytes go
     to a temporary file in the same folder, which is then renamed over
     `path` with the mode the new file got. If anything fails after `path`
-    was created, both files are removed.
+    was created, both files are removed; that includes a stop signal, which
+    the CLI turns into KeyboardInterrupt.
     """
     path = Path(path)
     try:

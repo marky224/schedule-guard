@@ -85,8 +85,10 @@ uv run schedule-guard export --db "$DB" --out "$(dirname "$DB")/riverbend-progre
 each task's % complete, actual start, actual finish, remaining work and notes,
 to the values in the database. It adds the baselines `rebaseline` made, and
 leaves the master schedule and the imported baselines exactly as imported. It
-refuses a path that already exists. Whether MS Project opens the file is
-untested: there is no MS Project desktop here, only the generated fixture.
+refuses a path that already exists. Ctrl+C, SIGTERM or SIGHUP while it writes
+removes what it wrote, with one line and exit 130. Whether MS Project opens the
+file is untested: there is no MS Project desktop here, only the generated
+fixture.
 
 The exported file imports into a new database like any MSPDI file, with two
 limits. The baselines `rebaseline` made come back as imported ones, so that
