@@ -111,6 +111,11 @@ def read_mspdi_bytes(path: str | Path) -> bytes:
 
 def parse_mspdi(data: bytes) -> MspdiProject:
     """Parse MSPDI bytes, or raise MspdiError saying why they were refused."""
+    return read_project(parse_tree(data))
+
+
+def parse_tree(data: bytes) -> ET.Element:
+    """The root of MSPDI bytes, parsed safely: a Project element in the MSPDI namespace, or MspdiError."""
     _check_size(data)
     try:
         root = SafeET.fromstring(data, forbid_dtd=True, forbid_entities=True, forbid_external=True)
@@ -124,17 +129,14 @@ def parse_mspdi(data: bytes) -> MspdiProject:
         raise MspdiError(f"unknown or unsupported encoding: {exc}") from exc
     if root.tag != _q("Project"):
         raise MspdiError(f"root element must be Project in namespace {NS}, not {root.tag!r}")
+    return root
 
-    containers = root.findall(_q("Tasks"))
-    if len(containers) > 1:
-        raise MspdiError("more than one Tasks element")
-    elements = containers[0].findall(_q("Task")) if containers else []
-    if len(elements) > MAX_TASKS:
-        raise MspdiError(f"more than {MAX_TASKS} tasks ({len(elements)})")
 
+def read_project(root: ET.Element) -> MspdiProject:
+    """The subset of a parsed MSPDI tree the guard needs, each value checked; its tasks in file order."""
     tasks: list[MspdiTask] = []
     seen: set[int] = set()
-    for index, el in enumerate(elements, start=1):
+    for index, el in enumerate(task_elements(root), start=1):
         task = _task(el, index)
         if task.uid in seen:
             raise MspdiError(f"duplicate task UID {task.uid}")
@@ -145,6 +147,17 @@ def parse_mspdi(data: bytes) -> MspdiProject:
         title=_text(root, "Title", "Project"),
         tasks=tuple(tasks),
     )
+
+
+def task_elements(root: ET.Element) -> list[ET.Element]:
+    """The project's Task elements, in file order."""
+    containers = root.findall(_q("Tasks"))
+    if len(containers) > 1:
+        raise MspdiError("more than one Tasks element")
+    elements = containers[0].findall(_q("Task")) if containers else []
+    if len(elements) > MAX_TASKS:
+        raise MspdiError(f"more than {MAX_TASKS} tasks ({len(elements)})")
+    return elements
 
 
 def _check_size(data: bytes) -> None:

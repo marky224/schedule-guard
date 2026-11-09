@@ -41,19 +41,18 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 
 ## Map
 - src/schedule_guard/ — application code (`cli.py`, `mspdi/parse.py` safe
-  MSPDI reader, `store/schema.sql` SQLite schema and read-only triggers,
-  the executable domain model, opened by `store/db.py`; `importer.py`,
-  `baselines.py`; `clock.py`, `guard.py` the pure guard G0–G7,
-  `progress.py` the applier; `sources/` the source protocol and the JSON
-  Lines file source, `sync.py` the sync engine, `review.py` conflict review;
-  `report/` the read-only FastAPI report and its Jinja2 templates,
-  `demo.py` the demo database)
+  MSPDI reader, `mspdi/export.py` the progress-only MSPDI writer,
+  `store/schema.sql` SQLite schema and read-only triggers, the executable
+  domain model, opened by `store/db.py`; `importer.py`, `baselines.py`;
+  `clock.py`, `guard.py` the pure guard G0–G7, `progress.py` the applier;
+  `sources/` the source protocol and the JSON Lines file source, `sync.py`
+  the sync engine, `review.py` conflict review; `report/` the read-only
+  FastAPI report and its Jinja2 templates, `demo.py` the demo database)
 - tests/ — oracles (smoke, fixture, MSPDI parser, store trigger, import,
-  baseline, clock, guard rule, applier, source, sync, review, report and
-  demo tests; `test_hygiene.py` scans tracked files, UTF-16 ones and UTF-16 runs in
-  other files too, for
-  GUIDs, tenant or secret assignments and XML elements, private key blocks
-  and key files;
+  baseline, clock, guard rule, applier, source, sync, review, report, demo
+  and export tests; `test_hygiene.py` scans tracked files, UTF-16 ones and
+  UTF-16 runs in other files too, for GUIDs, tenant or secret assignments
+  and XML elements, private key blocks and key files;
   `conftest.py` shared fixtures and the Hypothesis profile)
 - tests/properties/ — Hypothesis P1–P6 on the sync engine, a property that
   no line stops a run, the state machine and the teeth test (`harness.py`
