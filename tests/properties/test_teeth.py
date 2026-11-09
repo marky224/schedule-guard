@@ -8,6 +8,9 @@ tests themselves catch the very bug they guard against.
 
 A guard that replaces a task's notes with the new entry instead of
 appending it makes the P4 test itself fail.
+
+An exporter that also writes a planned element, or drops a Baseline, on
+each task it writes progress on makes the P7 test itself fail.
 """
 
 import json
@@ -16,12 +19,15 @@ from contextlib import closing
 from dataclasses import replace
 
 import pytest
-import test_invariants as invariants  # imported as a module, so its tests aren't collected twice
+import test_export_properties as export_properties  # modules, so their tests aren't collected twice
+import test_invariants as invariants
 from harness import BATCHES, CLOCK, ENGINE, assert_unchanged, baselines, master_schedule, progress_rows
 from hypothesis import Phase, given, settings
 
 from schedule_guard import guard, progress
 from schedule_guard import sync as sync_module
+from schedule_guard.mspdi import export
+from schedule_guard.mspdi.parse import NS
 from schedule_guard.sources.file import FileSource
 from schedule_guard.store.db import open_db
 from schedule_guard.sync import sync
@@ -121,3 +127,41 @@ def test_p4_itself_fails_on_a_guard_that_replaces_the_notes(fresh_db, monkeypatc
     first_failure = settings(ENGINE, phases=[Phase.generate], report_multiple_bugs=False)
     with pytest.raises(AssertionError, match="P4: "):
         first_failure(given(batches=BATCHES)(p4))(fresh_db=fresh_db)
+
+
+real_write_progress = export._write_progress
+
+
+def also_moves_the_finish(task, parsed, values):
+    written = real_write_progress(task, parsed, values)
+    if written:
+        task.find(f"{{{NS}}}Finish").text = "2030-01-01T17:00:00"
+    return written
+
+
+def also_drops_a_baseline(task, parsed, values):
+    written = real_write_progress(task, parsed, values)
+    if written:
+        task.remove(task.find(f"{{{NS}}}Baseline"))
+    return written
+
+
+EXPORTERS = {
+    "writes-a-planned-element": (also_moves_the_finish, "P7: a non-progress element changed"),
+    "drops-a-baseline": (also_drops_a_baseline, r"P7: Baselines \[\("),
+}
+
+
+@pytest.mark.parametrize(("broken", "message"), EXPORTERS.values(), ids=EXPORTERS.keys())
+def test_p7_itself_fails_on_a_broken_exporter(fresh_db, monkeypatch, broken, message):
+    # The P7 test's own body and strategies on fresh copies of the imported
+    # fixture. The broken exporter acts only on a task it writes progress on,
+    # so this also shows the strategies get progress written. Without
+    # shrinking, stopping at the first failure, as for P4.
+    monkeypatch.setattr(export, "_write_progress", broken)
+    p7 = export_properties.test_p7_the_export_keeps_the_master_schedule_and_baselines_and_re_imports
+    first_failure = settings(ENGINE, phases=[Phase.generate], report_multiple_bugs=False)
+    with pytest.raises(AssertionError, match=message):
+        first_failure(given(batches=BATCHES, rebaselines=export_properties.REBASELINES)(p7.hypothesis.inner_test))(
+            fresh_db=fresh_db
+        )
