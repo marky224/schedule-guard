@@ -28,6 +28,7 @@ and read in one snapshot; this module runs no write statement.
 """
 
 import os
+import signal
 import stat
 import tempfile
 from contextlib import closing
@@ -166,7 +167,7 @@ def _insert(task: ET.Element, new: ET.Element) -> None:
     task.insert(at + 1, new)
 
 
-def write_new_file(path: str | Path, data: bytes) -> None:
+def write_new_file(path: str | Path, data: bytes, *, mask_while_writing: set[int] | None = None) -> None:
     """Write `data` to `path`, which must not exist (Q97).
 
     `path` is created exclusively first, so an existing file, folder or
@@ -175,6 +176,13 @@ def write_new_file(path: str | Path, data: bytes) -> None:
     `path` with the mode the new file got. If anything fails after `path`
     was created, both files are removed; that includes a stop signal, which
     the CLI turns into KeyboardInterrupt.
+
+    The CLI calls this with its stop signals blocked and passes the mask
+    from before as `mask_while_writing`, the mask only while the bytes are
+    written. So a stop lands only there, where both files are removed: one
+    that comes while `path` or the temporary file is created is held and
+    raised as the write starts, and from the rename on, with the file
+    complete, they are held again.
     """
     path = Path(path)
     try:
@@ -190,10 +198,14 @@ def write_new_file(path: str | Path, data: bytes) -> None:
         tmp_fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=".schedule-guard-", suffix=".tmp")
         try:
             with open(tmp_fd, "wb") as f:
+                if mask_while_writing is not None:
+                    held = signal.pthread_sigmask(signal.SIG_SETMASK, mask_while_writing)  # a held stop raises here
                 f.write(data)
                 os.fchmod(f.fileno(), mode)
                 f.flush()
                 os.fsync(f.fileno())
+            if mask_while_writing is not None:
+                signal.pthread_sigmask(signal.SIG_SETMASK, held)  # from the rename on, the file is complete
             os.replace(tmp, path)
         except BaseException:
             Path(tmp).unlink(missing_ok=True)

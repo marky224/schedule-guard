@@ -642,8 +642,10 @@ Decision table:
   which it would write without its namespace; and so is an existing
   `--out` file (Q97): it is created exclusively, then a temporary file in
   the same folder is renamed over it. Ctrl+C, SIGTERM or SIGHUP while it
-  runs removes both and exits 130 with one line. Imported again, an export turns each Baseline
-  `rebaseline` added into an imported one, so the new database's report
+  runs removes both and exits 130 with one line; one that comes once the
+  file is in place is held, and the export finishes as usual (exit 0).
+  Imported again, an export turns each Baseline `rebaseline` added into an
+  imported one, so the new database's report
   measures variance against Baseline 0 (§7); a re-import is a fresh
   database (Q14).
 - "Openable in Project" needs MS Project desktop to confirm. The repo owner

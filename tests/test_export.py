@@ -395,3 +395,66 @@ def test_cli_export_stopped_while_it_writes_leaves_no_file_and_prints_one_line(f
     assert err == b"schedule-guard: stopped before the export finished; no partial file is left\n"
     assert list(folder.iterdir()) == []  # neither the empty --out nor the temporary file
     assert cli.main(args) == 0  # so the next export to that path isn't refused
+
+
+# A child that sends itself a stop signal at one point: just after os.open has created --out or the temporary file,
+# or while _export builds its line, once the file is in place.
+
+STOP_AT = """
+import os
+import signal
+import sys
+from schedule_guard import cli
+
+point, signum = sys.argv[1], getattr(signal, sys.argv[2])
+real_open, real_printable = os.open, cli._printable
+
+
+def open_then_stop(path, flags, *args, **kwargs):
+    fd = real_open(path, flags, *args, **kwargs)
+    if os.path.basename(path).startswith(point):
+        os.kill(os.getpid(), signum)
+    return fd
+
+
+def stop_then_printable(text):
+    os.kill(os.getpid(), signum)
+    return real_printable(text)
+
+
+if point == "line":
+    cli._printable = stop_then_printable
+else:
+    os.open = open_then_stop
+raise SystemExit(cli.main(sys.argv[3:]))
+"""
+WINDOWS = {"after-creating-out": "progress.xml", "inside-mkstemp": ".schedule-guard-"}
+
+
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM, signal.SIGHUP], ids=lambda signum: signum.name)
+@pytest.mark.parametrize("point", WINDOWS.values(), ids=WINDOWS.keys())
+def test_cli_export_stopped_as_a_file_is_created_leaves_no_file_and_prints_one_line(fixture_db, tmp_path, point, signum):
+    folder = tmp_path / "out"
+    folder.mkdir()
+    args = ["export", "--db", str(fixture_db), "--out", str(folder / "progress.xml")]
+    child = subprocess.run([sys.executable, "-c", STOP_AT, point, signum.name, *args], capture_output=True,
+                           preexec_fn=start_with, timeout=60)
+    assert (child.returncode, child.stdout) == (130, b""), child.stderr
+    assert child.stderr == b"schedule-guard: stopped before the export finished; no partial file is left\n"
+    assert list(folder.iterdir()) == []  # neither the empty --out nor the temporary file
+    assert cli.main(args) == 0  # so the next export to that path isn't refused
+
+
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM, signal.SIGHUP], ids=lambda signum: signum.name)
+def test_cli_export_stopped_once_the_file_is_in_place_finishes_as_usual(fixture_db, tmp_path, signum):
+    folder = tmp_path / "out"
+    folder.mkdir()
+    out = folder / "progress.xml"
+    child = subprocess.run(
+        [sys.executable, "-c", STOP_AT, "line", signum.name, "export", "--db", str(fixture_db), "--out", str(out)],
+        capture_output=True, preexec_fn=start_with, timeout=60,
+    )
+    assert (child.returncode, child.stderr) == (0, b""), child.stderr
+    assert child.stdout.decode().startswith("exported Riverbend Clinic: 40 tasks,") and child.stdout.count(b"\n") == 1
+    assert out.read_bytes() == export_mspdi(fixture_db).data
+    assert list(folder.iterdir()) == [out]

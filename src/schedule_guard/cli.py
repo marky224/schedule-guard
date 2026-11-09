@@ -310,7 +310,9 @@ def _stoppable(stopped: str) -> Callable[[Command], Command]:
     A stop before the server listens, or before export has its file in
     place (write_new_file has then removed what it wrote; export never
     serves), reaches here as KeyboardInterrupt: `stopped` as one line on
-    stderr and exit 130.
+    stderr and exit 130. A stop the command still holds blocked when it ends
+    (export holds them once its file is in place) came too late to stop
+    anything: it is dropped, and the signal mask goes back as it was.
     """
 
     def decorate(command: Command) -> Command:
@@ -318,6 +320,7 @@ def _stoppable(stopped: str) -> Callable[[Command], Command]:
         def run(args: argparse.Namespace) -> int:
             global _first_stop
             _first_stop = None
+            mask = signal.pthread_sigmask(signal.SIG_BLOCK, ())  # the mask as it is, unchanged
             previous = {signal.SIGTERM: signal.signal(signal.SIGTERM, _stop)}
             for signum, handler in ((signal.SIGINT, _stop), (signal.SIGHUP, _as_sigterm)):
                 if signal.getsignal(signum) is not signal.SIG_IGN:
@@ -330,6 +333,9 @@ def _stoppable(stopped: str) -> Callable[[Command], Command]:
             finally:
                 for signum, handler in previous.items():
                     signal.signal(signum, handler if _first_stop is None else signal.SIG_IGN)
+                for signum in set(STOP_SIGNALS) & signal.sigpending():
+                    signal.sigwait({signum})  # held past the end: dropped
+                signal.pthread_sigmask(signal.SIG_SETMASK, mask)
 
         return run
 
@@ -388,7 +394,10 @@ def _serve(db: Path, clock: Clock, port: int) -> int:
 @_stoppable("stopped before the export finished; no partial file is left")
 def _export(args: argparse.Namespace) -> int:
     exported = export_mspdi(args.db)  # a refused export leaves no file behind
-    write_new_file(args.out, exported.data)
+    # From here a stop is held, except while write_new_file writes the bytes, where it removes both files. One that
+    # comes once the file is in place is held to the end, so export prints its line and exits 0 (_stoppable drops it).
+    unheld = signal.pthread_sigmask(signal.SIG_BLOCK, STOP_SIGNALS)
+    write_new_file(args.out, exported.data, mask_while_writing=unheld)
     added = ", ".join(map(str, exported.added_baselines)) or "none"
     print(
         f"exported {_printable(exported.name or '(no name)')}: {exported.tasks} tasks, progress written on"
