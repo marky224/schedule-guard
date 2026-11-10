@@ -15,6 +15,7 @@
 | dismiss | resolve, accept, approve | The only review action on a conflict |
 | sync run | job, batch, sync (alone, as a noun) | One execution of sync with an id |
 | rerun | retry, replay | A run that reprocesses another run's captured items |
+| export | write-back, publish, sync back | Writes the imported MSPDI file again with the progress fields applied; only reads the database |
 | Tasks list | task table | Phase 2 SharePoint list the service publishes |
 | task | Tasks list row | An MSPDI task, identified by UID |
 | tenant admin | IT, admin (alone), owner's name | Phase 2: grants permissions and sets up the Team, lists and flow |

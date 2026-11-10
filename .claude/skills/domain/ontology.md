@@ -3,9 +3,10 @@
 Status: current for every Phase 1 table (`src/schedule_guard/store/schema.sql`,
 M2–M4), the guard's outcomes (`src/schedule_guard/guard.py`, M3), sync
 (`src/schedule_guard/sync.py`, M4) and the read-only report
-(`src/schedule_guard/report/`, M5); the Phase 2 tables are still planned
-(PLAN.md §3–5)
-Last verified: 2026-11-04
+(`src/schedule_guard/report/`, M5) and the MSPDI export
+(`src/schedule_guard/mspdi/export.py`, M7); the Phase 2 tables are still
+planned (PLAN.md §3–5)
+Last verified: 2026-11-08
 Executable source of truth: src/ schemas. If this page disagrees with code, code wins.
 
 ## Terms (use only these)
@@ -38,6 +39,10 @@ Executable source of truth: src/ schemas. If this page disagrees with code, code
   and error.
 - **Rerun**: a sync run that reprocesses the source items another run
   captured; refused for a run that captured nothing.
+- **Export**: `export --db --out` writes the imported MSPDI file again with
+  each task's progress fields from task progress and the baselines
+  `rebaseline` added; the master schedule and the imported baselines stay
+  as imported (P7).
 
 Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 
@@ -52,7 +57,8 @@ Forbidden synonyms: "plan" for baseline, "edit" for update, "job" for run.
 ## Relations
 - Project —has→ Task (1..n)
 - Project —has→ Baseline (0..11, numbered 0..10: import, the schema and
-  `rebaseline` all refuse any other number; the cap is UNVERIFIED, checked in M7)
+  `rebaseline` all refuse any other number; the cap is UNVERIFIED: no real
+  Project export to check it against, Q1)
 - Baseline —has→ Baseline task row —for→ Task
 - Task —has→ Task progress (1) —carries→ Task version
 - Source —emits→ Source item —versioned as→ Item version
@@ -114,6 +120,8 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
   stop signals are ignored until the process exits. A SIGHUP that was
   already ignored (nohup) stays ignored; a SIGKILL can't be caught and
   leaves the directory.
+- Export (`export`) is for anyone on the host, like the report: it reads
+  the database through a read-only connection and writes only a new file.
 - Phase 1 is a local CLI with no authentication: anyone with shell access to
   the host and the DB file can run every command. The roles above are
   conventions, not enforced checks. Whoever runs a command, the DB triggers
@@ -152,8 +160,11 @@ Reason codes: `malformed`, `unknown_task`, `field_not_allowed`,
   (no NaN, no key twice, no lone-surrogate escape) or has no usable key is
   one `malformed` conflict, keyed by its bytes.
 - Re-baseline appends and locks the new baseline; old baselines never
-  change. It refuses past baseline number 10 (UNVERIFIED, checked in M7).
+  change. It refuses past baseline number 10 (UNVERIFIED, Q1).
 - Imported baselines stay unlocked until `baseline lock`. A baseline is
   created unlocked and locked once, by `baseline lock` or `rebaseline`; it
   is never unlocked.
 - A database holds one project; the schema refuses a second (Q14).
+- Export writes only the progress fields and the baselines `rebaseline`
+  added; every other element stays C14N-identical to the import (P7). It
+  refuses an `--out` file that already exists (Q97).

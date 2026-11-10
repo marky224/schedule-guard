@@ -31,6 +31,9 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
   process exits; under nohup a SIGHUP stays ignored; two exceptions, a stop
   in roughly the first 0.1 s, before the CLI has installed its handlers, and
   a stop inside the FastAPI import: PLAN.md section 7)
+- Export: `uv run schedule-guard export --db <path> --out <new file>` writes
+  the imported MSPDI file with the progress written back; it only reads the
+  database and refuses an existing file
 - Test all: `uv run pytest -q` (Hypothesis is derandomized: the same examples every run)
 - Test one: `uv run pytest -q tests/test_smoke.py::test_cli_version_prints_package_version`
 - Regenerate the MSPDI fixture: `uv run python scripts/make_fixture.py`
@@ -41,22 +44,22 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
 
 ## Map
 - src/schedule_guard/ — application code (`cli.py`, `mspdi/parse.py` safe
-  MSPDI reader, `store/schema.sql` SQLite schema and read-only triggers,
-  the executable domain model, opened by `store/db.py`; `importer.py`,
-  `baselines.py`; `clock.py`, `guard.py` the pure guard G0–G7,
-  `progress.py` the applier; `sources/` the source protocol and the JSON
-  Lines file source, `sync.py` the sync engine, `review.py` conflict review;
-  `report/` the read-only FastAPI report and its Jinja2 templates,
-  `demo.py` the demo database)
+  MSPDI reader, `mspdi/export.py` the progress-only MSPDI writer,
+  `store/schema.sql` SQLite schema and read-only triggers, the executable
+  domain model, opened by `store/db.py`; `importer.py`, `baselines.py`;
+  `clock.py`, `guard.py` the pure guard G0–G7, `progress.py` the applier;
+  `sources/` the source protocol and the JSON Lines file source, `sync.py`
+  the sync engine, `review.py` conflict review; `report/` the read-only
+  FastAPI report and its Jinja2 templates, `demo.py` the demo database)
 - tests/ — oracles (smoke, fixture, MSPDI parser, store trigger, import,
-  baseline, clock, guard rule, applier, source, sync, review, report and
-  demo tests; `test_hygiene.py` scans tracked files, UTF-16 ones too, for
-  GUIDs, tenant or secret assignments and XML elements, private key blocks
-  and key files;
+  baseline, clock, guard rule, applier, source, sync, review, report, demo
+  and export tests; `test_hygiene.py` scans tracked files, UTF-16 ones and
+  UTF-16 runs in other files too, for GUIDs, tenant or secret assignments
+  and XML elements, private key blocks and key files;
   `conftest.py` shared fixtures and the Hypothesis profile)
-- tests/properties/ — Hypothesis P1–P6 on the sync engine, a property that
-  no line stops a run, the state machine and the teeth test (`harness.py`
-  writes the update files)
+- tests/properties/ — Hypothesis P1–P6 on the sync engine and P7 on the
+  export after it, a property that no line stops a run, the state machine
+  and the teeth test (`harness.py` writes the update files)
 - tests/fixtures/ — generated, fictional inputs (`riverbend-clinic.xml`,
   `updates/week-44.jsonl`, `demo-updates.jsonl`)
 - scripts/ — `make_fixture.py`, the seeded fixture generator
@@ -65,6 +68,7 @@ are in [PLAN.md](PLAN.md); the current work is in `specs/`.
   0.11.15), least privilege, actions pinned by full commit SHA;
   `dependabot.yml` proposes updates to those pins monthly
 - specs/001-offline-core/ — spec.md, plan.md, tasks.md for M1–M6
+- specs/002-export/ — spec.md, plan.md, tasks.md for M7 (MSPDI export, P7)
 - .claude/skills/domain/ — ontology, glossary (present)
 - PLAN.md — architecture, guard rules, milestones, decisions (§15), sources
 

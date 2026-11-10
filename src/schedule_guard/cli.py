@@ -15,6 +15,7 @@ from schedule_guard.baselines import BaselineRefused, lock_baseline, rebaseline
 from schedule_guard.clock import Clock
 from schedule_guard.demo import DEMO_CLOCK, DemoRefused, build_demo
 from schedule_guard.importer import ImportRefused, import_source, read_source
+from schedule_guard.mspdi.export import ExportRefused, export_mspdi, write_new_file
 from schedule_guard.mspdi.parse import MspdiError
 from schedule_guard.review import ReviewRefused, dismiss, list_conflicts
 from schedule_guard.sources.file import FileSource
@@ -22,7 +23,10 @@ from schedule_guard.store.db import StoreError, open_db
 from schedule_guard.sync import RunResult, SyncRefused, list_runs, rerun, sync
 
 # A refusal prints one error line and exits 1; OSError covers a missing file.
-REFUSALS = (MspdiError, StoreError, ImportRefused, BaselineRefused, SyncRefused, ReviewRefused, DemoRefused, OSError)
+REFUSALS = (
+    MspdiError, StoreError, ImportRefused, BaselineRefused, SyncRefused, ReviewRefused, DemoRefused, ExportRefused,
+    OSError,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -103,6 +107,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--port", type=_port, default=8000, metavar="PORT", help="the port on 127.0.0.1 (default: 8000)"
     )
     demo.set_defaults(run=_demo)
+
+    exp = commands.add_parser(
+        "export", parents=[db], help="write the project as MSPDI with its progress; the database is only read"
+    )
+    exp.add_argument(
+        "--out", required=True, type=Path, metavar="FILE", help="the MSPDI file to write; it must not exist"
+    )
+    exp.set_defaults(run=_export)
     return parser
 
 
@@ -247,7 +259,8 @@ def _conflicts_dismiss(args: argparse.Namespace) -> int:
 
 STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 REPEAT_WINDOW = 1.0  # seconds; `uv run` hands a terminal's one Ctrl+C to the command twice, about 0.2 s apart
-_first_stop: float | None = None  # when the running report or demo saw its first stop signal
+_first_stop: float | None = None  # when the running report, demo or export saw its first stop signal
+_NOT_SERVING = "stopped before the report started serving"
 
 
 def _repeat_stop() -> bool:
@@ -271,8 +284,11 @@ def _as_sigterm(signum: int, frame: object) -> None:
     signal.raise_signal(signal.SIGTERM)
 
 
-def _stoppable(command: Callable[[argparse.Namespace], int]) -> Callable[[argparse.Namespace], int]:
-    """Make SIGINT, SIGTERM and SIGHUP stop `command` once, and let cleanup finish.
+Command = Callable[[argparse.Namespace], int]
+
+
+def _stoppable(stopped: str) -> Callable[[Command], Command]:
+    """Make SIGINT, SIGTERM and SIGHUP stop the command once, let cleanup finish, and print `stopped`.
 
     uvicorn catches SIGINT and SIGTERM while it serves, shuts down, puts the
     old handlers back and raises the signal again; outside that, SIGINT and
@@ -291,36 +307,50 @@ def _stoppable(command: Callable[[argparse.Namespace], int]) -> Callable[[argpar
     and a repeat landing then would end the process by the signal. A SIGKILL
     can't be caught.
 
-    A stop before the server listens reaches here as KeyboardInterrupt: one
-    line on stderr and exit 130.
+    A stop before the server listens, or before export renames its file
+    into place (write_new_file has then removed what it wrote; export never
+    serves), reaches here as KeyboardInterrupt: `stopped` as one line on
+    stderr and exit 130. A stop the command still holds blocked when it ends
+    (export holds them from the rename on, with its file complete) came too
+    late to stop anything, but it is a stop all the same: the three are
+    ignored for the rest of the exit, which drops the held one too, and the
+    signal mask goes back as it was.
     """
 
-    @wraps(command)
-    def run(args: argparse.Namespace) -> int:
-        global _first_stop
-        _first_stop = None
-        previous = {signal.SIGTERM: signal.signal(signal.SIGTERM, _stop)}
-        for signum, handler in ((signal.SIGINT, _stop), (signal.SIGHUP, _as_sigterm)):
-            if signal.getsignal(signum) is not signal.SIG_IGN:
-                previous[signum] = signal.signal(signum, handler)
-        try:
-            return command(args)
-        except KeyboardInterrupt:
-            print("schedule-guard: stopped before the report started serving", file=sys.stderr)
-            return 130
-        finally:
-            for signum, handler in previous.items():
-                signal.signal(signum, handler if _first_stop is None else signal.SIG_IGN)
+    def decorate(command: Command) -> Command:
+        @wraps(command)
+        def run(args: argparse.Namespace) -> int:
+            global _first_stop
+            _first_stop = None
+            mask = signal.pthread_sigmask(signal.SIG_BLOCK, ())  # the mask as it is, unchanged
+            previous = {signal.SIGTERM: signal.signal(signal.SIGTERM, _stop)}
+            for signum, handler in ((signal.SIGINT, _stop), (signal.SIGHUP, _as_sigterm)):
+                if signal.getsignal(signum) is not signal.SIG_IGN:
+                    previous[signum] = signal.signal(signum, handler)
+            try:
+                return command(args)
+            except KeyboardInterrupt:
+                print(f"schedule-guard: {stopped}", file=sys.stderr)
+                return 130
+            finally:
+                held = set(previous) & signal.sigpending()  # a stop export held from the rename on
+                for signum, handler in previous.items():
+                    signal.signal(signum, signal.SIG_IGN if _first_stop is not None or held else handler)
+                for signum in set(STOP_SIGNALS) & signal.sigpending():
+                    signal.sigwait({signum})  # held past the end: dropped
+                signal.pthread_sigmask(signal.SIG_SETMASK, mask)
 
-    return run
+        return run
+
+    return decorate
 
 
-@_stoppable
+@_stoppable(_NOT_SERVING)
 def _serve_report(args: argparse.Namespace) -> int:
     return _serve(args.db, _now, args.port)
 
 
-@_stoppable
+@_stoppable(_NOT_SERVING)
 def _demo(args: argparse.Namespace) -> int:
     if args.db is not None:
         return _build_and_serve_demo(args.db, args.port)
@@ -361,6 +391,22 @@ def _serve(db: Path, clock: Clock, port: int) -> int:
     except KeyboardInterrupt:  # uvicorn has shut down and raised the stop signal again, after the window
         if not report.started:  # it stopped before it listened
             raise
+    return 0
+
+
+@_stoppable("stopped before the export finished; no partial file is left")
+def _export(args: argparse.Namespace) -> int:
+    exported = export_mspdi(args.db)  # a refused export leaves no file behind
+    # From here a stop is held, except while write_new_file writes the bytes, where it removes both files. One that
+    # comes from the rename on, with the file complete, is held to the end, so export prints its line and exits 0
+    # (_stoppable then ignores the three for the rest of the exit, which drops it).
+    unheld = signal.pthread_sigmask(signal.SIG_BLOCK, STOP_SIGNALS)
+    write_new_file(args.out, exported.data, mask_while_writing=unheld)
+    added = ", ".join(map(str, exported.added_baselines)) or "none"
+    print(
+        f"exported {_printable(exported.name or '(no name)')}: {exported.tasks} tasks, progress written on"
+        f" {exported.progress_tasks}, baselines added by rebaseline: {added}; wrote {_printable(str(args.out))}"
+    )
     return 0
 
 

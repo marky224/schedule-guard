@@ -56,7 +56,7 @@ or any baseline.
   that isn't UTF-8, it refuses. It
   refuses past baseline number 10 (**UNVERIFIED**: MS Project's Baseline plus
   Baseline1–10, from memory; Learn's Baseline element page gives no range;
-  checked in M7). Sync, rerun and report code never call it.
+  M7 had no real export to check it against, Q1). Sync, rerun and report code never call it.
 - **US3 Guard (M3).** Each progress update gets exactly one outcome:
   `applied`, `conflict` or `duplicate`. Checks, first failure wins:
   - G0: key already decided → `duplicate`.
@@ -180,9 +180,16 @@ or any baseline.
   temporary directory is removed either way, and once the command has
   ended after a stop, further stop signals are ignored until the process
   exits. Two cases still differ: a stop in roughly the first 0.1 s, before
-  the CLI has installed its handlers, ends the process by the signal
-  (SIGINT with Python's KeyboardInterrupt traceback, SIGTERM or SIGHUP
-  with no line) before any demo directory exists; and a stop inside the
+  the CLI has installed its handlers, comes before any demo directory
+  exists, and SIGTERM or SIGHUP then ends the process by the signal with no
+  line, while SIGINT ends it by the signal with no output before Python has
+  its own handler (about 0–4 ms measured), exits 1 with a "Fatal Python
+  error" (mostly init_import_site) while Python imports its `site` module
+  (about 5–6 ms), and after that mostly ends it by the signal with Python's
+  KeyboardInterrupt traceback; now and then, most often just after the
+  `site` import, start-up code only prints the interrupt ("Failed checking
+  if argv[0] is an import path entry" with a KeyboardInterrupt traceback
+  from zipimport, or "Exception ignored in: ...") and the command runs on; and a stop inside the
   FastAPI and pydantic import can print a traceback and exit 1. A SIGHUP
   that was already ignored (nohup) stays ignored.
 - **US6 Hygiene and CI (M6).** A test scans tracked files for GUID-shaped
@@ -191,7 +198,9 @@ or any baseline.
   and a closing tag (camelCase and acronym-prefixed names too), PRIVATE KEY
   blocks (PGP ones too), and key files (the seven suffixes `.gitignore`
   lists); a UTF-16 file is scanned both as UTF-16 and as UTF-8 (one
-  finding per line and kind), and a NUL-padded one as UTF-8 only. A GitHub Actions workflow runs
+  finding per line and kind), and a NUL-padded one as UTF-8; every file is
+  also scanned with each run of UTF-16 text in it (bytes that alternate
+  with NUL) read as UTF-16, so a UTF-16 line inside a UTF-8 file is found. A GitHub Actions workflow runs
   `uv run --locked pytest -q` (Q15), so a stale `uv.lock` fails it; its
   config gets a max-effort review.
 
@@ -204,7 +213,7 @@ or any baseline.
   element more than 3 levels below the Baseline or PredecessorLink: rejected
   before C14N, so the C14N work stays linear with a small constant. A
   Baseline `Number` above 10: rejected. (All UNVERIFIED against a real
-  Project export; checked in M7.)
+  Project export, Q1; M7 couldn't check them either.)
 - A carriage return in text (`&#13;`): stored as a line feed in the C14N
   bytes, which are those of the subtree as ElementTree writes it out again;
   the values read into the other columns keep it.
@@ -307,5 +316,5 @@ or any baseline.
   temp file; CI runs the suite on GitHub.
 
 ## Open questions
-- None blocking. The baseline-number cap (10) is UNVERIFIED and is checked
-  in M7.
+- None blocking. The baseline-number cap (10) is UNVERIFIED; M7 had no
+  real export to check it against (Q1).

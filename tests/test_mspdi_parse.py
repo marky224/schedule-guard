@@ -574,7 +574,7 @@ BAD_TASKS = {
         f"<Task><UID>1</UID><Baseline><Number>0</Number>{DEEP}</Baseline></Task>",
         "nested more than 3 levels below Baseline",
     ),
-    # At most 3 levels below a Baseline or a PredecessorLink (UNVERIFIED until M7).
+    # At most 3 levels below a Baseline or a PredecessorLink (UNVERIFIED, Q1).
     "baseline-four-levels": (
         "<Task><UID>1</UID><Baseline><Number>0</Number><a><b><c><d/></c></b></a></Baseline></Task>",
         "task UID 1 Baseline 0: elements are nested more than 3 levels below Baseline",
@@ -584,7 +584,7 @@ BAD_TASKS = {
         "</PredecessorLink></Task>",
         "task UID 1 planned elements: elements are nested more than 4 levels below Task",
     ),
-    # Numbers stop at 10, MS Project's Baseline plus Baseline1-10 (UNVERIFIED until M7).
+    # Numbers stop at 10, MS Project's Baseline plus Baseline1-10 (UNVERIFIED, Q1).
     "baseline-number-11": (
         "<Task><UID>1</UID><Baseline><Number>11</Number></Baseline></Task>",
         "task UID 1 Baseline: Number 11 is out of range",

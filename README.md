@@ -76,7 +76,26 @@ uv run schedule-guard conflicts dismiss --db "$DB" 1 --note "Resubmit against th
 
 # Append a new locked baseline from the current planned values. It can never be removed.
 uv run schedule-guard rebaseline --db "$DB" --confirm --reason "Owner approved the new dates"
+
+# Write the imported MSPDI file, with the progress applied, to a new file. The database is only read.
+uv run schedule-guard export --db "$DB" --out "$(dirname "$DB")/riverbend-progress.xml"
 ```
+
+`export` starts from the file the project was imported from and changes only
+each task's % complete, actual start, actual finish, remaining work and notes,
+to the values in the database. It adds the baselines `rebaseline` made, and
+leaves the master schedule and the imported baselines exactly as imported. It
+refuses a path that already exists. Ctrl+C, SIGTERM or SIGHUP while it writes
+removes what it wrote, with one line and exit 130; one that comes once the file
+is complete is too late, and the export finishes as usual. Whether MS Project
+opens the file is untested: there is no MS Project desktop here, only the
+generated fixture.
+
+The exported file imports into a new database like any MSPDI file, with two
+limits. The baselines `rebaseline` made come back as imported ones, so that
+database's report measures variance against Baseline 0, or has no variance
+baseline if the file has no Baseline 0. And import refuses a file over 20 MB,
+which long notes can push an export past.
 
 `rerun` processes again what an earlier run captured, as a new run, which is how
 a run that failed or was killed gets finished. It takes a run id from `runs list`,
@@ -146,10 +165,23 @@ within 1 s of the first is the same stop. A second Ctrl+C more than 1 s later
 forces the exit. Either way the demo's temporary directory is removed, and once
 the command has ended after a stop, further stop signals are ignored until the
 process exits. Two cases still differ. A stop in roughly the first 0.1 s, before
-the CLI has installed its handlers, ends the process by the signal: SIGINT with
-Python's KeyboardInterrupt traceback, SIGTERM or SIGHUP with no line. No demo
-directory exists yet then. A stop that lands inside the FastAPI and pydantic
-import can print a traceback and exit 1, though the directory is still removed.
+the CLI has installed its handlers, comes before any demo directory exists.
+SIGTERM or SIGHUP then ends the process by the signal with no line. SIGINT
+depends on when it lands: in the first few milliseconds, before Python has its
+own handler, it ends the process by the signal with no output; while Python
+imports its `site` module it exits 1 with a "Fatal Python error" (mostly
+init_import_site); after that it mostly ends the process by the signal with
+Python's KeyboardInterrupt traceback. Now and then, most often just after the
+`site` import, the interrupt lands in start-up code whose errors Python only
+prints, in one of two forms: "Failed checking if argv[0] is an import path
+entry", then a KeyboardInterrupt traceback from zipimport; or "Exception ignored
+in: ...", then KeyboardInterrupt. Either way the command runs on; `demo` then
+builds its database and serves. (Measured on one Linux
+machine: about 0–4 ms, about 5–6 ms, then from about 7 ms until the CLI's
+handlers were in, at about 60–70 ms; the command ran on in about 2 runs in 100
+between about 6 and 10 ms, and once at 30 ms.) A stop that lands inside the
+FastAPI and pydantic import can print a traceback and exit 1, though the
+directory is still removed.
 A SIGKILL can't be caught and leaves it, and under `nohup` a SIGHUP stays
 ignored.
 
@@ -165,9 +197,9 @@ updates to the workflow's two pinned actions once a month.
 
 ### What Phase 2 adds
 
-Phase 2 is planned, not built. It connects the same guard to a Microsoft 365
-tenant, with a daily sync on one Linux machine and nothing listening for inbound
-traffic:
+Phase 2 has begun with the offline MSPDI export (`export`, above). The rest is
+planned, not built. It connects the same guard to a Microsoft 365 tenant, with a
+daily sync on one Linux machine and nothing listening for inbound traffic:
 
 - A source that reads a SharePoint "Progress Updates" list through Microsoft
   Graph, with certificate sign-in and write access to two named lists only.
@@ -176,7 +208,6 @@ traffic:
   its row.
 - Alerts: a failed run posted to a Teams channel, and an email when an update
   becomes a conflict.
-- MSPDI export with progress applied and the baselines untouched.
 - A systemd user timer for the daily run.
 
 The design is in [PLAN.md](PLAN.md), section 9.
