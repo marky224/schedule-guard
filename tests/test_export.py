@@ -458,3 +458,40 @@ def test_cli_export_stopped_once_the_file_is_in_place_finishes_as_usual(fixture_
     assert child.stdout.decode().startswith("exported Riverbend Clinic: 40 tasks,") and child.stdout.count(b"\n") == 1
     assert out.read_bytes() == export_mspdi(fixture_db).data
     assert list(folder.iterdir()) == [out]
+
+
+# A child that holds a stop once the file is complete, then sends itself a second one from an atexit hook, after
+# main has returned, as the process exits.
+
+STOP_TWICE = """
+import atexit
+import os
+import signal
+import sys
+from schedule_guard import cli
+
+signum = getattr(signal, sys.argv[1])
+real_printable = cli._printable
+
+
+def stop_then_printable(text):
+    os.kill(os.getpid(), signum)
+    return real_printable(text)
+
+
+cli._printable = stop_then_printable
+atexit.register(os.kill, os.getpid(), signum)
+raise SystemExit(cli.main(sys.argv[2:]))
+"""
+
+
+@pytest.mark.parametrize("signum", [signal.SIGINT, signal.SIGTERM, signal.SIGHUP], ids=lambda signum: signum.name)
+def test_cli_export_that_held_a_stop_ignores_another_as_it_exits(fixture_db, tmp_path, signum):
+    out = tmp_path / "progress.xml"
+    child = subprocess.run(  # stdout is a pipe, so the line is still in its buffer as the process exits
+        [sys.executable, "-c", STOP_TWICE, signum.name, "export", "--db", str(fixture_db), "--out", str(out)],
+        capture_output=True, preexec_fn=start_with, timeout=60,
+    )
+    assert (child.returncode, child.stderr) == (0, b""), child.stderr
+    assert child.stdout.decode().startswith("exported Riverbend Clinic: 40 tasks,") and child.stdout.count(b"\n") == 1
+    assert out.read_bytes() == export_mspdi(fixture_db).data

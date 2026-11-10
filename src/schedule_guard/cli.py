@@ -307,12 +307,14 @@ def _stoppable(stopped: str) -> Callable[[Command], Command]:
     and a repeat landing then would end the process by the signal. A SIGKILL
     can't be caught.
 
-    A stop before the server listens, or before export has its file in
-    place (write_new_file has then removed what it wrote; export never
+    A stop before the server listens, or before export renames its file
+    into place (write_new_file has then removed what it wrote; export never
     serves), reaches here as KeyboardInterrupt: `stopped` as one line on
     stderr and exit 130. A stop the command still holds blocked when it ends
-    (export holds them once its file is in place) came too late to stop
-    anything: it is dropped, and the signal mask goes back as it was.
+    (export holds them from the rename on, with its file complete) came too
+    late to stop anything, but it is a stop all the same: the three are
+    ignored for the rest of the exit, which drops the held one too, and the
+    signal mask goes back as it was.
     """
 
     def decorate(command: Command) -> Command:
@@ -331,8 +333,9 @@ def _stoppable(stopped: str) -> Callable[[Command], Command]:
                 print(f"schedule-guard: {stopped}", file=sys.stderr)
                 return 130
             finally:
+                held = set(previous) & signal.sigpending()  # a stop export held from the rename on
                 for signum, handler in previous.items():
-                    signal.signal(signum, handler if _first_stop is None else signal.SIG_IGN)
+                    signal.signal(signum, signal.SIG_IGN if _first_stop is not None or held else handler)
                 for signum in set(STOP_SIGNALS) & signal.sigpending():
                     signal.sigwait({signum})  # held past the end: dropped
                 signal.pthread_sigmask(signal.SIG_SETMASK, mask)
@@ -395,7 +398,8 @@ def _serve(db: Path, clock: Clock, port: int) -> int:
 def _export(args: argparse.Namespace) -> int:
     exported = export_mspdi(args.db)  # a refused export leaves no file behind
     # From here a stop is held, except while write_new_file writes the bytes, where it removes both files. One that
-    # comes once the file is in place is held to the end, so export prints its line and exits 0 (_stoppable drops it).
+    # comes from the rename on, with the file complete, is held to the end, so export prints its line and exits 0
+    # (_stoppable then ignores the three for the rest of the exit, which drops it).
     unheld = signal.pthread_sigmask(signal.SIG_BLOCK, STOP_SIGNALS)
     write_new_file(args.out, exported.data, mask_while_writing=unheld)
     added = ", ".join(map(str, exported.added_baselines)) or "none"
