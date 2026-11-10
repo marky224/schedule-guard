@@ -209,5 +209,3 @@ daily sync on one Linux machine and nothing listening for inbound traffic:
 - Alerts: a failed run posted to a Teams channel, and an email when an update
   becomes a conflict.
 - A systemd user timer for the daily run.
-
-The design is in [PLAN.md](PLAN.md), section 9.
