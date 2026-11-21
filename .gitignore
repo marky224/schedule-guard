@@ -219,7 +219,7 @@ __marimo__/
 # Streamlit
 .streamlit/secrets.toml
 
-# schedule-guard: local data and credentials
+# schedule-guard: local data, credentials, private Claude files
 *.db
 *.db-wal
 *.db-shm
@@ -232,3 +232,5 @@ __marimo__/
 *.cer
 *.crt
 *.der
+CLAUDE.local.md
+.claude/settings.local.json
